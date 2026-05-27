@@ -109,9 +109,12 @@ async function rfc8484Passthrough(route, request) {
     : UPSTREAMS[route.provider];
   if (!target) return jsonError('unknown_provider');
 
+  const jsonUrl = target.url.includes('dns.google/dns-query')
+    ? 'https://dns.google/resolve'
+    : target.url;
+
   const query = stripLocalParams(route.queryString);
-  const url = new URL(target.url + query);
-  const upstreamReq = new Request(url, {
+  const upstreamReq = new Request(jsonUrl + query, {
     method: request.method,
     headers: {
       'Accept': 'application/dns-json',
