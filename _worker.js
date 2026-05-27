@@ -120,65 +120,19 @@ async function rfc8484Passthrough(route, request) {
 }
 
 async function passthroughSingle(request, upstreamUrl) {
-  const body = await getRequestBody(request);
-  const upstreamReq = new Request(upstreamUrl, {
-    method: 'POST',
-    headers: { 'Accept': 'application/dns-message', 'Content-Type': 'application/dns-message' },
-    body,
-  });
-
   try {
+    const upstreamReq = new Request(upstreamUrl, {
+      method: request.method,
+      headers: { 'Accept': 'application/dns-message' },
+      body: request.method !== 'GET' ? await request.clone().arrayBuffer() : undefined,
+    });
     const response = await fetch(upstreamReq);
     const responseBody = await response.arrayBuffer();
     if (response.status === 200 && answersPass(responseBody)) return dnsResponse(responseBody);
   } catch (_) {}
 
-  return dnsResponse(servfail(body));
-}
-
-function getRequestBody(request) {
-  if (request.method === 'GET') {
-    return buildQueryFromURL(new URL(request.url)) || new ArrayBuffer(12);
-  }
-  return request.clone().arrayBuffer();
-}
-
-async function passthroughAll(route, request) {
-  const body = await getRequestBody(request);
-  const started = Date.now();
-  const deadline = started + HARD_TIMEOUT_MS;
-
-  const pool = Object.entries(UPSTREAMS).map(([name, cfg]) => ({
-    name,
-    promise: (async () => {
-      try {
-        const upstreamReq = new Request(cfg.url, {
-          method: 'POST',
-          headers: { 'Accept': 'application/dns-message', 'Content-Type': 'application/dns-message' },
-          body,
-        });
-        const response = await fetch(upstreamReq);
-        const responseBody = await response.arrayBuffer();
-        return response.status === 200 && answersPass(responseBody)
-          ? { valid: true, response: responseBody, time: Date.now() - started }
-          : { valid: false };
-      } catch (_) { return { valid: false }; }
-    })(),
-  }));
-
-  while (pool.length && Date.now() < deadline) {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) break;
-    const settled = await Promise.race([
-      ...pool.map((p) => p.promise.then((r) => ({ pending: p, result: r }))),
-      sleep(remaining).then(() => null),
-    ]);
-    if (!settled) break;
-    pool.splice(pool.indexOf(settled.pending), 1);
-    if (settled.result.valid) return dnsResponse(settled.result.response, settled.result.time);
-  }
-
-  return dnsResponse(servfail(body));
+  const fallback = request.method !== 'GET' ? await request.clone().arrayBuffer() : new ArrayBuffer(12);
+  return dnsResponse(servfail(fallback));
 }
 
 async function singleUpstream(provider, body, clientIP, mode, queryString) {
