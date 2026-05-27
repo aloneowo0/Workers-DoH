@@ -18,10 +18,11 @@ export default {
           : serveHomepage(request, UPSTREAMS, upstreamNames);
       }
       if (route.error) return jsonError(route.error);
-      body = await request.clone().arrayBuffer();
-      if (!body || body.byteLength === 0) {
+      if (request.method === 'GET') {
         body = buildQueryFromURL(new URL(request.url));
         if (!body) return jsonError('missing_name_or_type');
+      } else {
+        body = await request.clone().arrayBuffer();
       }
       const clientIP = request.headers.get('CF-Connecting-IP');
       if (route.provider === MIX_PROVIDER) {
