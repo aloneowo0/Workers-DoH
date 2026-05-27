@@ -115,7 +115,7 @@ async function rfc8484Passthrough(route, request) {
     method: request.method,
     headers: {
       'Accept': 'application/dns-json',
-      'Content-Type': request.headers.get('Content-Type') || 'application/dns-json',
+      ...(request.method !== 'GET' ? { 'Content-Type': request.headers.get('Content-Type') || 'application/dns-json' } : {}),
     },
     body: request.method !== 'GET' ? await request.clone().arrayBuffer() : null,
   });
@@ -208,6 +208,7 @@ async function singleUpstream(provider, body, clientIP, mode) {
     const responseBody = await response.arrayBuffer();
     const elapsed = Date.now() - started;
     if (response.status === 200 && answersPass(responseBody)) return dnsResponse(responseBody, elapsed);
+    return dnsResponse(servfail(body), elapsed);
   } catch (_) {}
   return dnsResponse(servfail(body));
 }
@@ -250,7 +251,7 @@ async function concurrentAll(body, clientIP, mode) {
     }
   }
 
-  return dnsResponse(servfail(body));
+  return dnsResponse(servfail(body), Date.now() - started);
 }
 
 async function queryUpstream(name, url, body, started) {
