@@ -43,9 +43,9 @@ export default {
       }
       const clientIP = request.headers.get('CF-Connecting-IP');
       if (route.provider === MIX_PROVIDER) {
-        return await concurrentAll(body, clientIP, route.mode, route.queryString);
+        return await concurrentAll(body, clientIP, route.mode);
       }
-      return await singleUpstream(route.provider, body, clientIP, route.mode, route.queryString);
+      return await singleUpstream(route.provider, body, clientIP, route.mode);
     } catch (_) {
       return body ? dnsResponse(servfail(body)) : jsonError('internal_error', 500);
     }
@@ -53,7 +53,16 @@ export default {
 };
 
 function buildQueryFromURL(url) {
-  const name = url.searchParams.get('name') || url.searchParams.get('dns');
+  const dnsParam = url.searchParams.get('dns');
+  if (dnsParam) {
+    try {
+      const b64 = dnsParam.replace(/-/g, '+').replace(/_/g, '/');
+      const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+      return bin.buffer;
+    } catch (_) {}
+  }
+
+  const name = url.searchParams.get('name');
   if (!name) return null;
   const typeStr = (url.searchParams.get('type') || 'A').toUpperCase();
   const typeMap = { A: 1, AAAA: 28, TXT: 16, MX: 15, CNAME: 5, NS: 2, SOA: 6, PTR: 12, HTTPS: 65, SVCB: 64 };
@@ -90,13 +99,17 @@ function buildQueryFromURL(url) {
   return out.buffer;
 }
 
+function stripLocalParams(search) {
+  return search.replace(/[?&]mode=[^&]*/g, '').replace(/^&/, '?');
+}
+
 async function rfc8484Passthrough(route, request) {
   const target = route.provider === MIX_PROVIDER
     ? Object.values(UPSTREAMS)[0]
     : UPSTREAMS[route.provider];
   if (!target) return jsonError('unknown_provider');
 
-  const query = route.queryString.replace(/[?&]mode=[^&]*/g, '').replace(/^&/, '?');
+  const query = stripLocalParams(route.queryString);
   const url = new URL(target.url + query);
   const upstreamReq = new Request(url, {
     method: request.method,
@@ -122,7 +135,7 @@ async function rfc8484Passthrough(route, request) {
 async function passthroughSingle(request, upstreamUrl) {
   try {
     const qs = request.method === 'GET' && request.url.includes('?')
-      ? request.url.slice(request.url.indexOf('?')).replace(/[?&]mode=[^&]*/g, '').replace(/^&/, '?')
+      ? stripLocalParams(request.url.slice(request.url.indexOf('?')))
       : '';
     const url = qs ? upstreamUrl + qs : upstreamUrl;
     const upstreamReq = new Request(url, {
@@ -181,14 +194,7 @@ async function passthroughAll(route, request) {
   return dnsResponse(servfail(fallback));
 }
 
-function getRequestBody(request) {
-  if (request.method === 'GET') {
-    return buildQueryFromURL(new URL(request.url)) || new ArrayBuffer(12);
-  }
-  return request.clone().arrayBuffer();
-}
-
-async function singleUpstream(provider, body, clientIP, mode, queryString) {
+async function singleUpstream(provider, body, clientIP, mode) {
   const upstream = UPSTREAMS[provider];
   if (!upstream) return dnsResponse(servfail(body));
   const modeBody = applyMode(body, clientIP, mode, provider);
@@ -206,7 +212,7 @@ async function singleUpstream(provider, body, clientIP, mode, queryString) {
   return dnsResponse(servfail(body));
 }
 
-async function concurrentAll(body, clientIP, mode, queryString) {
+async function concurrentAll(body, clientIP, mode) {
   const hasEcs = mode !== 'keep' || detectECS(body);
   const started = Date.now();
   const deadline = started + HARD_TIMEOUT_MS;
