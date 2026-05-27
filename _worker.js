@@ -161,7 +161,7 @@ async function passthroughAll(route, request) {
     promise: (async () => {
       try {
         const qs = request.method === 'GET' && request.url.includes('?')
-          ? request.url.slice(request.url.indexOf('?')).replace(/[?&]mode=[^&]*/g, '').replace(/^&/, '?')
+          ? stripLocalParams(request.url.slice(request.url.indexOf('?')))
           : '';
         const url = qs ? cfg.url + qs : cfg.url;
         const upstreamReq = new Request(url, {
