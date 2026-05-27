@@ -278,6 +278,16 @@ function buildUpstreamListWithMix(upstreams, names) {
   return entries || '<em>none</em>';
 }
 
+function buildCheckboxes(names) {
+  if (!names || names.length === 0) return '';
+  return names
+    .map(
+      (n) =>
+        '<label><input type="checkbox" value="' + n + '" checked> <strong>' + n + '</strong></label>'
+    )
+    .join('');
+}
+
 function inject(html, host, upstreams, names) {
   return html
     .replaceAll('__HOST__', host)
