@@ -16,23 +16,16 @@
 ## 快速开始
 
 ```bash
-# 1. Fork 本仓库，Clone 到本地
-git clone https://github.com/YOUR_USER/cloudflare-doh-v2
-cd cloudflare-doh-v2
-
-# 2. 编辑配置
-cp .env.example .env
-# 按需开关上游、调整超时 ...
-
-# 3. 部署
-npm run build && git add config.js && git commit -m "update config" && git push
+# 1. Fork 本仓库到你的 GitHub
+# 2. 在 GitHub 上直接编辑 .env：开关上游、调整参数
+# 3. Cloudflare 控制台 → Workers & Pages → 连接你的仓库
 ```
 
-> Cloudflare Workers 检测到 main 分支更新后自动部署（需先在 Cloudflare 控制台连接 GitHub 仓库并设置 `CF_API_TOKEN` secret）。也可使用 [GitHub Actions](.github/workflows/deploy.yml) 自动部署。
+> 部署前需要构建 `config.js`：在 Cloudflare 控制台将 Build command 设置为 `npm run build`，或使用仓库中预置的 [GitHub Actions](.github/workflows/deploy.yml)。
 
 ## 配置
 
-编辑 `.env` 文件，然后运行 `node scripts/build-config.cjs` 生成 `config.js`。
+编辑 `.env` 文件，然后运行 `npm run build` 生成 `config.js`（或由 CI 自动完成）。
 
 ```env
 # 预设上游开关（true=启用 false=关闭）
