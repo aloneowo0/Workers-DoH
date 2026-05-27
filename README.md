@@ -160,6 +160,7 @@ Workers-DoH/
 
 ## 注意事项
 
+- **mix 端点保证可用**：单上游可能因网络波动或策略限制（如 quad9 超时、360 拒绝某些域名）返回错误，mix 并发竞速可覆盖这些缺陷。生产使用建议始终走 `/mix/query-dns`。
 - **CF 并发上限**：Workers 免费计划约 6 个并发 subrequest，标准付费约 8-10 个。mix 模式超配额的上游会内部排队，建议启用不超过 8 个上游。
 - **CF-Connecting-IP**：ECS 注入依赖此请求头，仅在 Cloudflare 代理环境下可用。非 CF 环境需自行传入客户端 IP。
 - **自定义上游默认值**：`CUSTOM_*` 默认 `ecs/plus` 均为 `true`。若上游不支持，需在 `build-config.cjs` 的预设表或构建逻辑中调整。
