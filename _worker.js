@@ -6,6 +6,10 @@ import { resolveRoute } from './router.js';
 const DNS_HEADERS = { 'Content-Type': 'application/dns-message' };
 const JSON_HEADERS = { 'Content-Type': 'application/json;charset=utf-8' };
 
+function timed(upstreamTime) {
+  return { ...DNS_HEADERS, 'X-Upstream-Time': String(upstreamTime) };
+}
+
 export default {
   async fetch(request) {
     let body = null;
@@ -34,6 +38,7 @@ async function singleUpstream(provider, body, clientIP, mode, queryString) {
   const upstream = UPSTREAMS[provider];
   if (!upstream) return dnsResponse(servfail(body));
   const modeBody = applyMode(body, clientIP, mode, provider);
+  const started = Date.now();
   try {
     const response = await fetch(upstream.url, {
       method: 'POST',
@@ -41,7 +46,8 @@ async function singleUpstream(provider, body, clientIP, mode, queryString) {
       body: modeBody,
     });
     const responseBody = await response.arrayBuffer();
-    if (response.status === 200 && answersPass(responseBody)) return dnsResponse(responseBody);
+    const elapsed = Date.now() - started;
+    if (response.status === 200 && answersPass(responseBody)) return dnsResponse(responseBody, elapsed);
   } catch (_) {}
   return dnsResponse(servfail(body));
 }
@@ -76,7 +82,7 @@ async function concurrentAll(body, clientIP, mode, queryString) {
 
   for (const name of priority) {
     const result = results.find((r) => r.name === name && r.valid);
-    if (result) return dnsResponse(result.response);
+    if (result) return dnsResponse(result.response, result.time);
   }
   return dnsResponse(servfail(body));
 }
@@ -108,8 +114,11 @@ function answersPass(responseBody) {
   return result !== false && result?.passed !== false;
 }
 
-function dnsResponse(body) {
-  return new Response(body, { status: 200, headers: DNS_HEADERS });
+function dnsResponse(body, upstreamTime) {
+  const headers = upstreamTime != null
+    ? { ...DNS_HEADERS, 'X-Upstream-Time': String(upstreamTime) }
+    : DNS_HEADERS;
+  return new Response(body, { status: 200, headers });
 }
 
 function jsonError(error, status = 400) {

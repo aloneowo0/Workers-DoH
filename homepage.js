@@ -107,7 +107,7 @@ curl "https://__HOST__/cloudflare/query-dns?name=example.com"</code></pre>
     <p>选择上游端点，点击按钮测试延迟：</p>
     <div id="targets">__UPSTREAM_CHECKBOXES__</div>
     <p><button class="btn" onclick="runLatencyTest()">开始检测</button></p>
-    <div id="results"><table><thead><tr><th>端点</th><th>延迟</th><th>状态</th></tr></thead><tbody></tbody></table></div>
+    <div id="results"><table><thead><tr><th>端点</th><th>W→U→W 延迟</th><th>状态</th></tr></thead><tbody></tbody></table></div>
   </section>
 </div>
 <footer>
@@ -125,14 +125,13 @@ async function runLatencyTest(){
   const cs=document.querySelectorAll('#targets input:checked');
   if(!cs.length){t.innerHTML='<tr><td colspan=3 style="color:#999;text-align:center;padding:16px">未选择端点</td></tr>';return}
   const tasks=[...cs].map(async cb=>{
-    const n=cb.value,row=t.insertRow();
-    row.innerHTML='<td><strong>'+n+'</strong></td><td style="color:#999">...</td><td style="color:#999">...</td>';
-    const s=performance.now();
-    try{const res=await fetch('/'+n+'/query-dns',{method:'POST',headers:{'Content-Type':'application/dns-message'},body:b64toBytes(FIXED_QUERY)});row.cells[1].textContent=(performance.now()-s).toFixed(0)+'ms';row.cells[2].textContent=res.ok?'\u2705':'\u274C '+res.status}
-    catch(e){row.cells[1].textContent='-';row.cells[2].textContent='\u274C'}
-  });
-  await Promise.all(tasks);
-}
+     const n=cb.value,row=t.insertRow();
+     row.innerHTML='<td><strong>'+n+'</strong></td><td style="color:#999">...</td><td style="color:#999">...</td>';
+     try{const res=await fetch('/'+n+'/query-dns',{method:'POST',headers:{'Content-Type':'application/dns-message'},body:b64toBytes(FIXED_QUERY)});const xt=res.headers.get('X-Upstream-Time');row.cells[1].textContent=xt?xt+'ms':'-';row.cells[2].textContent=res.ok?'\u2705':'\u274C '+res.status}
+     catch(e){row.cells[1].textContent='-';row.cells[2].textContent='\u274C'}
+   });
+   await Promise.all(tasks);
+ }
 </script>
 </body>
 </html>`;
@@ -241,7 +240,7 @@ curl "https://__HOST__/cloudflare/query-dns?name=example.com"</code></pre>
     <p>Select upstream endpoints and click to measure latency:</p>
     <div id="targets">__UPSTREAM_CHECKBOXES__</div>
     <p><button class="btn" onclick="runLatencyTest()">Start Test</button></p>
-    <div id="results"><table><thead><tr><th>Endpoint</th><th>Latency</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+    <div id="results"><table><thead><tr><th>Endpoint</th><th>W→U→W</th><th>Status</th></tr></thead><tbody></tbody></table></div>
   </section>
 </div>
 <footer>
