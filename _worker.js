@@ -19,18 +19,29 @@ export default {
       }
       if (route.error) return jsonError(route.error);
 
-      const clientIP = request.headers.get('CF-Connecting-IP');
       const acceptHeader = request.headers.get('Accept') || '';
       if (acceptHeader.includes('application/dns-json')) {
-        return await rfc8484Passthrough(route, request, clientIP);
+        return await rfc8484Passthrough(route, request);
       }
 
+      // keep mode: forward request as-is, only filter the response
+      if (route.mode === 'keep') {
+        if (route.provider === MIX_PROVIDER) {
+          return await passthroughAll(route, request);
+        }
+        const upstream = UPSTREAMS[route.provider];
+        if (!upstream) return jsonError('unknown_provider');
+        return await passthroughSingle(request, upstream.url + route.queryString);
+      }
+
+      // auto/plus: build or read body, apply EDNS, forward
       if (request.method === 'GET') {
         body = buildQueryFromURL(new URL(request.url));
         if (!body) return jsonError('missing_name_or_type');
       } else {
         body = await request.clone().arrayBuffer();
       }
+      const clientIP = request.headers.get('CF-Connecting-IP');
       if (route.provider === MIX_PROVIDER) {
         return await concurrentAll(body, clientIP, route.mode, route.queryString);
       }
@@ -79,7 +90,7 @@ function buildQueryFromURL(url) {
   return out.buffer;
 }
 
-async function rfc8484Passthrough(route, request, clientIP) {
+async function rfc8484Passthrough(route, request) {
   const target = route.provider === MIX_PROVIDER
     ? Object.values(UPSTREAMS)[0]
     : UPSTREAMS[route.provider];
@@ -105,6 +116,61 @@ async function rfc8484Passthrough(route, request, clientIP) {
   } catch (_) {
     return jsonError('upstream_error', 502);
   }
+}
+
+async function passthroughSingle(request, upstreamUrl) {
+  const upstreamReq = new Request(upstreamUrl, {
+    method: request.method,
+    headers: { 'Accept': 'application/dns-message', 'Content-Type': 'application/dns-message' },
+    body: request.method !== 'GET' ? await request.clone().arrayBuffer() : undefined,
+  });
+
+  try {
+    const response = await fetch(upstreamReq);
+    const responseBody = await response.arrayBuffer();
+    if (response.status === 200 && answersPass(responseBody)) return dnsResponse(responseBody);
+  } catch (_) {}
+
+  const fallback = request.method !== 'GET' ? await request.clone().arrayBuffer() : new ArrayBuffer(12);
+  return dnsResponse(servfail(fallback));
+}
+
+async function passthroughAll(route, request) {
+  const started = Date.now();
+  const deadline = started + HARD_TIMEOUT_MS;
+
+  const pool = Object.entries(UPSTREAMS).map(([name, cfg]) => ({
+    name,
+    promise: (async () => {
+      try {
+        const upstreamReq = new Request(cfg.url + route.queryString, {
+          method: request.method,
+          headers: { 'Accept': 'application/dns-message', 'Content-Type': 'application/dns-message' },
+          body: request.method !== 'GET' ? await request.clone().arrayBuffer() : undefined,
+        });
+        const response = await fetch(upstreamReq);
+        const responseBody = await response.arrayBuffer();
+        return response.status === 200 && answersPass(responseBody)
+          ? { valid: true, response: responseBody, time: Date.now() - started }
+          : { valid: false };
+      } catch (_) { return { valid: false }; }
+    })(),
+  }));
+
+  while (pool.length && Date.now() < deadline) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const settled = await Promise.race([
+      ...pool.map((p) => p.promise.then((r) => ({ pending: p, result: r }))),
+      sleep(remaining).then(() => null),
+    ]);
+    if (!settled) break;
+    pool.splice(pool.indexOf(settled.pending), 1);
+    if (settled.result.valid) return dnsResponse(settled.result.response, settled.result.time);
+  }
+
+  const fallback = request.method !== 'GET' ? await request.clone().arrayBuffer() : new ArrayBuffer(12);
+  return dnsResponse(servfail(fallback));
 }
 
 async function singleUpstream(provider, body, clientIP, mode, queryString) {
