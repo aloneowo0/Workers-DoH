@@ -135,6 +135,13 @@ async function passthroughSingle(request, upstreamUrl) {
   return dnsResponse(servfail(fallback));
 }
 
+function getRequestBody(request) {
+  if (request.method === 'GET') {
+    return buildQueryFromURL(new URL(request.url)) || new ArrayBuffer(12);
+  }
+  return request.clone().arrayBuffer();
+}
+
 async function singleUpstream(provider, body, clientIP, mode, queryString) {
   const upstream = UPSTREAMS[provider];
   if (!upstream) return dnsResponse(servfail(body));
