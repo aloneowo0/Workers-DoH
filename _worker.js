@@ -33,9 +33,9 @@ export default {
 async function singleUpstream(provider, body, clientIP, mode, queryString) {
   const upstream = UPSTREAMS[provider];
   if (!upstream) return dnsResponse(servfail(body));
-  const modeBody = applyMode(body, clientIP, mode);
+  const modeBody = applyMode(body, clientIP, mode, provider);
   try {
-    const response = await fetch(upstream + queryString, {
+    const response = await fetch(upstream.url + queryString, {
       method: 'POST',
       headers: DNS_HEADERS,
       body: modeBody,
@@ -49,14 +49,16 @@ async function singleUpstream(provider, body, clientIP, mode, queryString) {
 async function concurrentAll(body, clientIP, mode, queryString) {
   const hasEcs = mode !== 'keep' || detectECS(body);
   const priority = hasEcs ? ECS_PRIORITY : NO_ECS_PRIORITY;
-  const modeBody = applyMode(body, clientIP, mode);
   const started = Date.now();
   const deadline = started + HARD_TIMEOUT_MS;
 
-  const pending = priority.map((name) => ({
-    name,
-    promise: queryUpstream(name, UPSTREAMS[name] + queryString, modeBody, started),
-  }));
+  const pending = priority
+    .filter((name) => UPSTREAMS[name])
+    .map((name) => ({
+      name,
+      promise: queryUpstream(name, UPSTREAMS[name].url + queryString,
+        applyMode(body, clientIP, mode, name), started),
+    }));
 
   const results = [];
   while (pending.length && Date.now() < deadline) {
@@ -94,9 +96,10 @@ async function queryUpstream(name, url, body, started) {
   }
 }
 
-function applyMode(body, clientIP, mode) {
-  if (mode === 'plus') return plusMode(body, clientIP);
-  if (mode === 'auto') return autoMode(body, clientIP);
+function applyMode(body, clientIP, mode, provider) {
+  const caps = UPSTREAMS[provider] || {};
+  if (mode === 'plus' && caps.plus) return plusMode(body, clientIP);
+  if (mode === 'auto' && caps.ecs) return autoMode(body, clientIP);
   return keepMode(body);
 }
 
