@@ -50,7 +50,7 @@ footer a{color:var(--primary-color)}
 .caps-table .yes{color:#27ae60;font-weight:700}
 .caps-table .no{color:#e74c3c}
 .row{display:flex;gap:20px;flex-wrap:wrap}
-.row>div{flex:1;min-width:280px}
+.row>section{flex:1;min-width:280px}
 @media(max-width:600px){header h1{font-size:1.5rem}section{padding:1rem}.lang-switch{float:none;display:inline-block;margin-top:.5rem}.row{flex-direction:column}}
 </style>
 </head>
@@ -187,7 +187,7 @@ footer a{color:var(--primary-color)}
 .caps-table .yes{color:#27ae60;font-weight:700}
 .caps-table .no{color:#e74c3c}
 .row{display:flex;gap:20px;flex-wrap:wrap}
-.row>div{flex:1;min-width:280px}
+.row>section{flex:1;min-width:280px}
 @media(max-width:600px){header h1{font-size:1.5rem}section{padding:1rem}.lang-switch{float:none;display:inline-block;margin-top:.5rem}.row{flex-direction:column}}
 </style>
 </head>
