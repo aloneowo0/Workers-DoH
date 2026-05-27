@@ -25,7 +25,7 @@
 
 provider 可选值：`google` `cloudflare` `quad9` `adguard` `opendns` `dnspod` `alidns` `360` `nextdns` `yandex`。
 
-支持 DNS 类型：A（默认）、AAAA、TXT、MX、CNAME、NS、SOA、PTR。
+支持 DNS 类型：A（默认）、AAAA、HTTPS、SVCB、TXT、MX、CNAME、NS、SOA、PTR。
 
 ```bash
 # GET 查询
