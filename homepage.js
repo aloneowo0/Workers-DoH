@@ -80,23 +80,20 @@ footer a{color:var(--primary-color)}
     <p>__UPSTREAM_LIST__</p>
   </section>
 
+  <div class="row">
   <section>
-    <h2>上游 EDNS 能力 &amp; 延迟检测</h2>
-    <div class="row">
-      <div>
-        <h3>EDNS 支持</h3>
-        <p style="font-size:.85em;color:#666">部署时自动探测或手动标记</p>
-        __EDNS_CAPS_TABLE__
-      </div>
-      <div>
-        <h3>延迟检测</h3>
-        <p style="font-size:.85em;color:#666;margin-bottom:8px">选择端点，测试完整往返延迟</p>
-        <div id="targets">__UPSTREAM_CHECKBOXES__</div>
-        <p style="margin-top:8px"><button class="btn" onclick="runLatencyTest()">开始检测</button></p>
-        <div id="results"><table><thead><tr><th>端点</th><th>完整延迟</th><th>W→U→W</th><th>状态</th></tr></thead><tbody></tbody></table></div>
-      </div>
-    </div>
+    <h2>上游 EDNS 能力</h2>
+    <p style="font-size:.85em;color:#666">部署时自动探测或手动标记</p>
+    __EDNS_CAPS_TABLE__
   </section>
+  <section>
+    <h2>延迟检测</h2>
+    <p style="font-size:.85em;color:#666;margin-bottom:8px">选择端点，测试完整往返延迟</p>
+    <div id="targets">__UPSTREAM_CHECKBOXES__</div>
+    <p style="margin-top:8px"><button class="btn" onclick="runLatencyTest()">开始检测</button></p>
+    <div id="results"><table><thead><tr><th>端点</th><th>完整延迟</th><th>W→U→W</th><th>状态</th></tr></thead><tbody></tbody></table></div>
+  </section>
+</div>
 
   <section>
     <h2>使用方法</h2>
@@ -220,23 +217,20 @@ footer a{color:var(--primary-color)}
     <p>__UPSTREAM_LIST__</p>
   </section>
 
+  <div class="row">
   <section>
-    <h2>Upstream EDNS &amp; Latency</h2>
-    <div class="row">
-      <div>
-        <h3>EDNS Support</h3>
-        <p style="font-size:.85em;color:#666">Auto-detected or manually configured</p>
-        __EDNS_CAPS_TABLE__
-      </div>
-      <div>
-        <h3>Latency Test</h3>
-        <p style="font-size:.85em;color:#666;margin-bottom:8px">Select endpoints to measure full round-trip</p>
-        <div id="targets">__UPSTREAM_CHECKBOXES__</div>
-        <p style="margin-top:8px"><button class="btn" onclick="runLatencyTest()">Start Test</button></p>
-        <div id="results"><table><thead><tr><th>Endpoint</th><th>Total</th><th>W→U→W</th><th>Status</th></tr></thead><tbody></tbody></table></div>
-      </div>
-    </div>
+    <h2>Upstream EDNS Capabilities</h2>
+    <p style="font-size:.85em;color:#666">Auto-detected or manually configured</p>
+    __EDNS_CAPS_TABLE__
   </section>
+  <section>
+    <h2>Latency Test</h2>
+    <p style="font-size:.85em;color:#666;margin-bottom:8px">Select endpoints to measure full round-trip</p>
+    <div id="targets">__UPSTREAM_CHECKBOXES__</div>
+    <p style="margin-top:8px"><button class="btn" onclick="runLatencyTest()">Start Test</button></p>
+    <div id="results"><table><thead><tr><th>Endpoint</th><th>Total</th><th>W→U→W</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+  </section>
+</div>
 
   <section>
     <h2>Usage</h2>
