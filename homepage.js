@@ -304,14 +304,14 @@ function inject(html, host, upstreams, names) {
 
 function buildCapsTable(upstreams) {
   if (!upstreams || Object.keys(upstreams).length === 0) return '<em>none</em>';
-  let rows = '<table class="caps-table"><thead><tr><th>Upstream</th><th>URL</th><th>ECS</th><th>Plus</th></tr></thead><tbody>';
+  let rows = '<table class="caps-table"><thead><tr><th>Upstream</th><th>ECS</th><th>Plus</th></tr></thead><tbody>';
   for (const [name, cfg] of Object.entries(upstreams)) {
     const ecs = cfg.ecs ? '<span class="yes">\u2705</span>' : '<span class="no">\u2716</span>';
     const plus = cfg.plus ? '<span class="yes">\u2705</span>' : '<span class="no">\u2716</span>';
-    const urlShort = cfg.url.length > 60 ? cfg.url.slice(0, 57) + '...' : cfg.url;
-    rows += `<tr><td><strong>${name}</strong></td><td style="font-size:.82em;word-break:break-all">${urlShort}</td><td>${ecs}</td><td>${plus}</td></tr>`;
+    rows += `<tr><td><strong>${name}</strong></td><td>${ecs}</td><td>${plus}</td></tr>`;
   }
   rows += '</tbody></table>';
+  rows += '<p style="font-size:.78em;color:#888;margin-top:6px">ECS = 支持 EDNS Client-Subnet（地理位置优化） Plus = 支持 UDP 4096 + DO + ECS + Padding 完整 EDNS 扩展</p>';
   return rows;
 }
 
