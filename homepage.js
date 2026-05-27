@@ -97,7 +97,7 @@ footer a{color:var(--primary-color)}
 
   <section>
     <h2>使用方法</h2>
-    <p>支持 POST application/dns-message 二进制和 GET 查询参数（?name=&type=）。</p>
+    <p>支持 POST application/dns-message、GET ?name=&type= 和 Accept: application/dns-json（RFC 8484 透传）。</p>
     <h3>并发模式</h3>
     <pre><code>curl "https://__HOST__/mix/query-dns?name=example.com&type=A"
 # 全部上游并发，返回最快有效响应</code></pre>
@@ -234,7 +234,7 @@ footer a{color:var(--primary-color)}
 
   <section>
     <h2>Usage</h2>
-    <p>Supports POST application/dns-message binary and GET query params (?name=&type=).</p>
+    <p>Supports POST application/dns-message, GET ?name=&type=, and Accept: application/dns-json (RFC 8484 passthrough).</p>
     <h3>Concurrent mode</h3>
     <pre><code>curl "https://__HOST__/mix/query-dns?name=example.com&type=A"
 # Queries all upstreams, returns fastest response</code></pre>
