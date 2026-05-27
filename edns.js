@@ -1,4 +1,4 @@
-import { BLOCKED_RANGES, ECS_PREFIX4 } from './config.js';
+import { BLOCKED_RANGES, ECS_PREFIX4, ECS_PREFIX6 } from './config.js';
 
 const DNS_HEADER_LEN = 12;
 const TYPE_A = 1;
@@ -250,7 +250,15 @@ function appendOpt(packet, options, ttl) {
 }
 
 function makeEcsOption(clientIP) {
-    const addr = parsePublicIPv4(clientIP);
+    const ip = extractClientIP(clientIP);
+    if (!ip) return null;
+
+    if (ip.includes(':')) return makeEcsOption6(ip);
+    return makeEcsOption4(ip);
+}
+
+function makeEcsOption4(ip) {
+    const addr = parsePublicIPv4(ip);
     if (!addr) return null;
 
     const prefix = ECS_PREFIX4;
@@ -262,6 +270,30 @@ function makeEcsOption(clientIP) {
     view.setUint16(0, OPT_ECS);
     view.setUint16(2, optionLen);
     view.setUint16(4, 1);
+    option[6] = prefix;
+    option[7] = 0;
+    option.set(addr.subarray(0, addrLen), 8);
+
+    if (prefix % 8 !== 0 && addrLen > 0) {
+        option[7 + addrLen] &= (0xFF << (8 - (prefix % 8))) & 0xFF;
+    }
+
+    return option;
+}
+
+function makeEcsOption6(ip) {
+    const addr = parsePublicIPv6(ip);
+    if (!addr) return null;
+
+    const prefix = ECS_PREFIX6;
+    const addrLen = Math.ceil(prefix / 8);
+    const optionLen = 4 + addrLen;
+    const option = new Uint8Array(4 + optionLen);
+    const view = new DataView(option.buffer);
+
+    view.setUint16(0, OPT_ECS);
+    view.setUint16(2, optionLen);
+    view.setUint16(4, 2);
     option[6] = prefix;
     option[7] = 0;
     option.set(addr.subarray(0, addrLen), 8);
@@ -308,6 +340,38 @@ function parsePublicIPv4(value) {
     if (a === 198 && (b === 18 || b === 19)) return null;
     if (a === 198 && b === 51 && c === 100) return null;
     if (a === 203 && b === 0 && c === 113) return null;
+
+    return addr;
+}
+
+function parsePublicIPv6(value) {
+    const ip = extractClientIP(value);
+    if (!ip || !ip.includes(':')) return null;
+
+    const parts = ip.split('::');
+    if (parts.length > 2) return null;
+    const left = parts[0] ? parts[0].split(':').filter(g => g !== '') : [];
+    const right = parts[1] ? parts[1].split(':').filter(g => g !== '') : [];
+    const fill = 8 - left.length - right.length;
+    if (fill < 0) return null;
+
+    const groups = [...left, ...Array(fill).fill('0'), ...right];
+    const addr = new Uint8Array(16);
+    for (let i = 0; i < 8; i++) {
+        const val = parseInt(groups[i] || '0', 16);
+        if (isNaN(val)) return null;
+        addr[i * 2] = (val >> 8) & 0xFF;
+        addr[i * 2 + 1] = val & 0xFF;
+    }
+
+    if (addr[0] === 0xFE && (addr[1] & 0xC0) === 0x80) return null;
+    if (addr.every(b => b === 0)) return null;
+    if (addr[0] === 0 && addr[1] === 0 && addr[2] === 0 && addr[3] === 0 &&
+        addr[4] === 0 && addr[5] === 0 && addr[6] === 0 && addr[7] === 0 &&
+        addr[8] === 0 && addr[9] === 0 && addr[10] === 0 && addr[11] === 0 &&
+        addr[12] === 0 && addr[13] === 0 && addr[14] === 0 && addr[15] === 1) return null;
+    if (addr[0] === 0xFD) return null;
+    if (addr[0] === 0xFC) return null;
 
     return addr;
 }

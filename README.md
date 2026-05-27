@@ -148,7 +148,6 @@ Workers-DoH/
 
 ## 后续计划
 
-- **IPv6 ECS 注入** — 当前仅支持 IPv4 客户端子网，需增加 IPv6 前缀处理
 - **跨平台适配器** — Vercel Serverless Functions 和 EdgeOne Pages 的部署配置与构建适配
 
 MIT
