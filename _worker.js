@@ -1,4 +1,4 @@
-import { HARD_TIMEOUT_MS, MIX_PROVIDER, UPSTREAMS } from './config.js';
+import { ECS_PROTECT_MS, HARD_TIMEOUT_MS, MIX_PROVIDER, UPSTREAMS } from './config.js';
 import { autoMode, detectECS, filterAnswers, keepMode, plusMode } from './edns.js';
 import { serveHomepage, serveHomepageEn } from './homepage.js';
 import { resolveRoute } from './router.js';
@@ -57,47 +57,47 @@ async function concurrentAll(body, clientIP, mode, queryString) {
   const started = Date.now();
   const deadline = started + HARD_TIMEOUT_MS;
 
-  const racePool = Object.entries(UPSTREAMS).map(([name, cfg]) => ({
+  // Fire all upstreams concurrently
+  const pool = Object.entries(UPSTREAMS).map(([name, cfg]) => ({
     name,
     ecs: cfg.ecs,
     promise: queryUpstream(name, cfg.url, applyMode(body, clientIP, mode, name), started),
+    held: false,
   }));
 
-  if (hasEcs) {
-    // Phase 1: ECS-supported only, 20ms head start
-    const phase1End = started + 20;
-    const ecsPool = racePool.filter((u) => u.ecs);
-    while (ecsPool.length && Date.now() < Math.min(phase1End, deadline)) {
-      const remaining = Math.min(phase1End, deadline) - Date.now();
-      if (remaining <= 0) break;
-      const settled = await Promise.race([
-        ...ecsPool.map((u) => u.promise.then((r) => ({ upstream: u, result: r }))),
-        sleep(remaining).then(() => null),
-      ]);
-      if (!settled) break;
-      ecsPool.splice(ecsPool.indexOf(settled.upstream), 1);
-      if (settled.result.valid) return dnsResponse(settled.result.response, settled.result.time);
-    }
-    // Phase 2: add non-ECS, continue racing
-    const allPool = [...ecsPool, ...racePool.filter((u) => !u.ecs)];
-    return raceFirstValid(allPool, deadline, body);
-  }
+  const protectEnd = hasEcs ? started + ECS_PROTECT_MS : 0;
 
-  return raceFirstValid(racePool, deadline, body);
-}
-
-async function raceFirstValid(pool, deadline, body) {
-  while (pool.length && Date.now() < deadline) {
-    const remaining = deadline - Date.now();
+  while (pool.some((u) => !u.held) && Date.now() < deadline) {
+    const remaining = Math.min(protectEnd > Date.now() ? protectEnd : deadline, deadline) - Date.now();
     if (remaining <= 0) break;
     const settled = await Promise.race([
-      ...pool.map((u) => u.promise.then((r) => ({ upstream: u, result: r }))),
+      ...pool.filter((u) => !u.held).map((u) => u.promise.then((r) => ({ upstream: u, result: r }))),
       sleep(remaining).then(() => null),
     ]);
     if (!settled) break;
-    pool.splice(pool.indexOf(settled.upstream), 1);
+    settled.upstream.held = true;
+
+    if (protectEnd && Date.now() < protectEnd) {
+      // Protection window: only return valid ECS responses
+      if (settled.upstream.ecs && settled.result.valid) {
+        return dnsResponse(settled.result.response, settled.result.time);
+      }
+      // Non-ECS or invalid → held, continue waiting
+      continue;
+    }
+
+    // After protection: any valid response wins
     if (settled.result.valid) return dnsResponse(settled.result.response, settled.result.time);
   }
+
+  // Still nothing? Check any buffered valid results
+  for (const u of pool) {
+    if (u.held) {
+      const result = await u.promise;
+      if (result.valid) return dnsResponse(result.response, result.time);
+    }
+  }
+
   return dnsResponse(servfail(body));
 }
 
