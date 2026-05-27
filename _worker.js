@@ -31,7 +31,7 @@ export default {
         }
         const upstream = UPSTREAMS[route.provider];
         if (!upstream) return jsonError('unknown_provider');
-        return await passthroughSingle(request, upstream.url + route.queryString);
+        return await passthroughSingle(request, upstream.url);
       }
 
       // auto/plus: build or read body, apply EDNS, forward
@@ -96,7 +96,8 @@ async function rfc8484Passthrough(route, request) {
     : UPSTREAMS[route.provider];
   if (!target) return jsonError('unknown_provider');
 
-  const url = new URL(target.url + route.queryString);
+  const query = route.queryString.replace(/[?&]mode=[^&]*/g, '').replace(/^&/, '?');
+  const url = new URL(target.url + query);
   const upstreamReq = new Request(url, {
     method: request.method,
     headers: {
@@ -151,7 +152,7 @@ async function passthroughAll(route, request) {
     name,
     promise: (async () => {
       try {
-        const upstreamReq = new Request(cfg.url + route.queryString, {
+        const upstreamReq = new Request(cfg.url, {
           method: 'POST',
           headers: { 'Accept': 'application/dns-message', 'Content-Type': 'application/dns-message' },
           body,
