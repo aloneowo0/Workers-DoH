@@ -49,7 +49,9 @@ footer a{color:var(--primary-color)}
 .caps-table td{padding:6px 10px;border-bottom:1px solid #eee;font-size:.88em}
 .caps-table .yes{color:#27ae60;font-weight:700}
 .caps-table .no{color:#e74c3c}
-@media(max-width:600px){header h1{font-size:1.5rem}section{padding:1rem}.lang-switch{float:none;display:inline-block;margin-top:.5rem}}
+.row{display:flex;gap:20px;flex-wrap:wrap}
+.row>div{flex:1;min-width:280px}
+@media(max-width:600px){header h1{font-size:1.5rem}section{padding:1rem}.lang-switch{float:none;display:inline-block;margin-top:.5rem}.row{flex-direction:column}}
 </style>
 </head>
 <body>
@@ -79,9 +81,21 @@ footer a{color:var(--primary-color)}
   </section>
 
   <section>
-    <h2>上游 EDNS 能力</h2>
-    <p>部署时自动探测或手动标记的 EDNS 支持情况：</p>
-    __EDNS_CAPS_TABLE__
+    <h2>上游 EDNS 能力 &amp; 延迟检测</h2>
+    <div class="row">
+      <div>
+        <h3>EDNS 支持</h3>
+        <p style="font-size:.85em;color:#666">部署时自动探测或手动标记</p>
+        __EDNS_CAPS_TABLE__
+      </div>
+      <div>
+        <h3>延迟检测</h3>
+        <p style="font-size:.85em;color:#666;margin-bottom:8px">选择端点，测试完整往返延迟</p>
+        <div id="targets">__UPSTREAM_CHECKBOXES__</div>
+        <p style="margin-top:8px"><button class="btn" onclick="runLatencyTest()">开始检测</button></p>
+        <div id="results"><table><thead><tr><th>端点</th><th>完整延迟</th><th>W→U→W</th><th>状态</th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </div>
   </section>
 
   <section>
@@ -100,14 +114,6 @@ footer a{color:var(--primary-color)}
     <pre><code>curl "https://__HOST__/google/query-dns?name=example.com"
 curl "https://__HOST__/cloudflare/query-dns?name=example.com"</code></pre>
     <p style="font-size:.85em;color:#666;margin-top:.8rem">更多可选上游：<span class="endpoint">/quad9/query-dns</span> <span class="endpoint">/adguard/query-dns</span> <span class="endpoint">/opendns/query-dns</span>（在 config.js 中取消注释即可启用）</p>
-  </section>
-
-  <section>
-    <h2>延迟检测</h2>
-    <p>选择上游端点，点击按钮测试延迟：</p>
-    <div id="targets">__UPSTREAM_CHECKBOXES__</div>
-    <p><button class="btn" onclick="runLatencyTest()">开始检测</button></p>
-    <div id="results"><table><thead><tr><th>端点</th><th>完整延迟</th><th>W→U→W</th><th>状态</th></tr></thead><tbody></tbody></table></div>
   </section>
 </div>
 <footer>
@@ -183,7 +189,9 @@ footer a{color:var(--primary-color)}
 .caps-table td{padding:6px 10px;border-bottom:1px solid #eee;font-size:.88em}
 .caps-table .yes{color:#27ae60;font-weight:700}
 .caps-table .no{color:#e74c3c}
-@media(max-width:600px){header h1{font-size:1.5rem}section{padding:1rem}.lang-switch{float:none;display:inline-block;margin-top:.5rem}}
+.row{display:flex;gap:20px;flex-wrap:wrap}
+.row>div{flex:1;min-width:280px}
+@media(max-width:600px){header h1{font-size:1.5rem}section{padding:1rem}.lang-switch{float:none;display:inline-block;margin-top:.5rem}.row{flex-direction:column}}
 </style>
 </head>
 <body>
@@ -213,9 +221,21 @@ footer a{color:var(--primary-color)}
   </section>
 
   <section>
-    <h2>Upstream EDNS Capabilities</h2>
-    <p>Auto-detected or manually configured EDNS support:</p>
-    __EDNS_CAPS_TABLE__
+    <h2>Upstream EDNS &amp; Latency</h2>
+    <div class="row">
+      <div>
+        <h3>EDNS Support</h3>
+        <p style="font-size:.85em;color:#666">Auto-detected or manually configured</p>
+        __EDNS_CAPS_TABLE__
+      </div>
+      <div>
+        <h3>Latency Test</h3>
+        <p style="font-size:.85em;color:#666;margin-bottom:8px">Select endpoints to measure full round-trip</p>
+        <div id="targets">__UPSTREAM_CHECKBOXES__</div>
+        <p style="margin-top:8px"><button class="btn" onclick="runLatencyTest()">Start Test</button></p>
+        <div id="results"><table><thead><tr><th>Endpoint</th><th>Total</th><th>W→U→W</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </div>
   </section>
 
   <section>
@@ -234,14 +254,6 @@ footer a{color:var(--primary-color)}
     <pre><code>curl "https://__HOST__/google/query-dns?name=example.com"
 curl "https://__HOST__/cloudflare/query-dns?name=example.com"</code></pre>
     <p style="font-size:.85em;color:#666;margin-top:.8rem">More optional upstreams: <span class="endpoint">/quad9/query-dns</span> <span class="endpoint">/adguard/query-dns</span> <span class="endpoint">/opendns/query-dns</span> (uncomment in config.js to enable)</p>
-  </section>
-
-  <section>
-    <h2>Latency Test</h2>
-    <p>Select upstream endpoints and click to measure latency:</p>
-    <div id="targets">__UPSTREAM_CHECKBOXES__</div>
-    <p><button class="btn" onclick="runLatencyTest()">Start Test</button></p>
-    <div id="results"><table><thead><tr><th>Endpoint</th><th>Total</th><th>W→U→W</th><th>Status</th></tr></thead><tbody></tbody></table></div>
   </section>
 </div>
 <footer>
