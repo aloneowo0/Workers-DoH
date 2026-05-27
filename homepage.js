@@ -107,7 +107,7 @@ curl "https://__HOST__/cloudflare/query-dns?name=example.com"</code></pre>
     <p>选择上游端点，点击按钮测试延迟：</p>
     <div id="targets">__UPSTREAM_CHECKBOXES__</div>
     <p><button class="btn" onclick="runLatencyTest()">开始检测</button></p>
-    <div id="results"><table><thead><tr><th>端点</th><th>W→U→W 延迟</th><th>状态</th></tr></thead><tbody></tbody></table></div>
+    <div id="results"><table><thead><tr><th>端点</th><th>延迟</th><th>状态</th></tr></thead><tbody></tbody></table></div>
   </section>
 </div>
 <footer>
@@ -127,7 +127,8 @@ async function runLatencyTest(){
   const tasks=[...cs].map(async cb=>{
      const n=cb.value,row=t.insertRow();
      row.innerHTML='<td><strong>'+n+'</strong></td><td style="color:#999">...</td><td style="color:#999">...</td>';
-     try{const res=await fetch('/'+n+'/query-dns',{method:'POST',headers:{'Content-Type':'application/dns-message'},body:b64toBytes(FIXED_QUERY)});const xt=res.headers.get('X-Upstream-Time');row.cells[1].textContent=xt?xt+'ms':'-';row.cells[2].textContent=res.ok?'\u2705':'\u274C '+res.status}
+     const s=performance.now();
+     try{const res=await fetch('/'+n+'/query-dns',{method:'POST',headers:{'Content-Type':'application/dns-message'},body:b64toBytes(FIXED_QUERY)});row.cells[1].textContent=(performance.now()-s).toFixed(0)+'ms';row.cells[2].textContent=res.ok?'\u2705':'\u274C '+res.status}
      catch(e){row.cells[1].textContent='-';row.cells[2].textContent='\u274C'}
    });
    await Promise.all(tasks);
@@ -240,7 +241,7 @@ curl "https://__HOST__/cloudflare/query-dns?name=example.com"</code></pre>
     <p>Select upstream endpoints and click to measure latency:</p>
     <div id="targets">__UPSTREAM_CHECKBOXES__</div>
     <p><button class="btn" onclick="runLatencyTest()">Start Test</button></p>
-    <div id="results"><table><thead><tr><th>Endpoint</th><th>W→U→W</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+    <div id="results"><table><thead><tr><th>Endpoint</th><th>Latency</th><th>Status</th></tr></thead><tbody></tbody></table></div>
   </section>
 </div>
 <footer>
@@ -272,21 +273,17 @@ async function runLatencyTest(){
 
 // ── Shared helpers ─────────────────────────────────────────────────
 
-function buildUpstreamList(names) {
-  if (!names || names.length === 0) return '<em>none</em>';
-  return names
-    .map((n) => '<span class="endpoint">/' + n + '/query-dns</span>')
-    .join(' ');
+function buildUpstreamListWithMix(upstreams, names) {
+  const entries = names.map((n) => '<span class="endpoint">/' + n + '/query-dns</span>').join(' ');
+  return entries || '<em>none</em>';
 }
 
-function buildCheckboxes(names) {
-  if (!names || names.length === 0) return '';
-  return names
-    .map(
-      (n) =>
-        '<label><input type="checkbox" value="' + n + '" checked> <strong>' + n + '</strong></label>'
-    )
-    .join('');
+function inject(html, host, upstreams, names) {
+  return html
+    .replaceAll('__HOST__', host)
+    .replace('__UPSTREAM_LIST__', buildUpstreamListWithMix(upstreams, names))
+    .replace('__UPSTREAM_CHECKBOXES__', buildCheckboxes(names))
+    .replace('__EDNS_CAPS_TABLE__', buildCapsTable(upstreams));
 }
 
 function buildCapsTable(upstreams) {
@@ -319,9 +316,17 @@ function inject(html, host, upstreams) {
  * @param {object} upstreams  UPSTREAMS config object
  * @returns {Response}
  */
-export function serveHomepage(request, upstreams) {
+export function serveHomepage(request, upstreams, names) {
   const host = new URL(request.url).host;
-  return new Response(inject(HTML_CN, host, upstreams), {
+  return new Response(inject(HTML_CN, host, upstreams, names), {
+    status: 200,
+    headers: { 'Content-Type': 'text/html;charset=utf-8' },
+  });
+}
+
+export function serveHomepageEn(request, upstreams, names) {
+  const host = new URL(request.url).host;
+  return new Response(inject(HTML_EN, host, upstreams, names), {
     status: 200,
     headers: { 'Content-Type': 'text/html;charset=utf-8' },
   });
