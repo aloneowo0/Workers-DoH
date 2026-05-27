@@ -96,6 +96,16 @@ export function filterAnswers(response) {
     return { passed: true, reason: null };
 }
 
+export function detectECS(body) {
+    try {
+        const packet = parseDns(body);
+        if (!packet.opt) return false;
+        return readOptions(packet.view, packet.opt).hasEcs;
+    } catch (_) {
+        return false;
+    }
+}
+
 function parseDns(body) {
     const bytes = toBytes(body);
     if (bytes.length < DNS_HEADER_LEN) throw new Error('short DNS packet');

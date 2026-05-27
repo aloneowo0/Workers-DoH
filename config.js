@@ -7,11 +7,14 @@ export const UPSTREAMS = {
     opendns:  'https://dns.opendns.com/dns-query',
 };
 
-/** Concurrency: wait after the first valid response (ms). */
-export const GRACE_WINDOW_MS = 50;
-
 /** Concurrency: hard cap on total wait (ms). */
 export const HARD_TIMEOUT_MS = 800;
+
+/** Mix priority when ECS is present (original or injected). */
+export const ECS_PRIORITY = ['google', 'quad9', 'adguard', 'opendns', 'cloudflare'];
+
+/** Mix priority when no ECS. */
+export const NO_ECS_PRIORITY = ['cloudflare', 'google', 'quad9', 'adguard', 'opendns'];
 
 /** EDNS client-subnet IPv4 prefix length. */
 export const ECS_PREFIX4 = 24;
