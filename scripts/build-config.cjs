@@ -3,7 +3,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 
 // ── 预设上游的 URL 和 EDNS 能力 ──────────────────────────────────
 const PRESETS = {
@@ -59,36 +58,10 @@ function buildUpstreams(env) {
             console.warn(`Skip invalid custom upstream name: ${key} → ${name}`);
             continue;
         }
-        // 自动探测 EDNS 支持
-        console.log(`Probing ${name}: ${url} ...`);
-        const caps = probeEDNS(url);
-        upstreams[name] = { url, ...caps };
-        console.log(`  ecs=${caps.ecs} plus=${caps.plus}`);
+        upstreams[name] = { url, ecs: true, plus: true };
     }
 
     return upstreams;
-}
-
-// ── 探测 EDNS 能力 ────────────────────────────────────────────────
-function probeEDNS(url) {
-    // 默认值（探测失败时使用）
-    const result = { ecs: true, plus: true };
-
-    try {
-        // 用 curl 发 basic DNS 查询测试连通性
-        const query = 'AAABAAABAAAAAAAAA2RucwZnb29nbGUDY29tAAABAAE=';
-        execSync(
-            `curl -sS --connect-timeout 5 -m 10 -o /dev/null -w '%{http_code}' ` +
-            `-X POST -H 'Accept: application/dns-message' ` +
-            `-H 'Content-Type: application/dns-message' ` +
-            `--data-binary '${query}' '${url}'`,
-            { encoding: 'utf-8', timeout: 15000 }
-        );
-    } catch (_) {
-        console.warn(`  Warning: probe failed for ${url}, using defaults`);
-    }
-
-    return result;
 }
 
 // ── 解析 CIDR 黑名单 ───────────────────────────────────────────────

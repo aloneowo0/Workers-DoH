@@ -149,8 +149,6 @@ Workers-DoH/
 ## 后续计划
 
 - **IPv6 ECS 注入** — 当前仅支持 IPv4 客户端子网，需增加 IPv6 前缀处理
-- **EDNS 自动探测** — 自定义上游添加时真正探测 ECS/Plus 能力，而非使用默认值
-- **保护期窗口缓存** — ECS 保护期间接收的非 ECS 响应暂存，窗口结束后直接取用而非丢弃
 - **跨平台适配器** — Vercel Serverless Functions 和 EdgeOne Pages 的部署配置与构建适配
 
 MIT
