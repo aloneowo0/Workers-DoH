@@ -35,7 +35,7 @@ async function singleUpstream(provider, body, clientIP, mode, queryString) {
   if (!upstream) return dnsResponse(servfail(body));
   const modeBody = applyMode(body, clientIP, mode, provider);
   try {
-    const response = await fetch(upstream.url + queryString, {
+    const response = await fetch(upstream.url, {
       method: 'POST',
       headers: DNS_HEADERS,
       body: modeBody,
@@ -56,7 +56,7 @@ async function concurrentAll(body, clientIP, mode, queryString) {
     .filter((name) => UPSTREAMS[name])
     .map((name) => ({
       name,
-      promise: queryUpstream(name, UPSTREAMS[name].url + queryString,
+      promise: queryUpstream(name, UPSTREAMS[name].url,
         applyMode(body, clientIP, mode, name), started),
     }));
 
