@@ -299,15 +299,6 @@ function buildCapsTable(upstreams) {
   return rows;
 }
 
-function inject(html, host, upstreams) {
-  const names = Object.keys(upstreams);
-  return html
-    .replaceAll('__HOST__', host)
-    .replace('__UPSTREAM_LIST__', buildUpstreamList(names))
-    .replace('__UPSTREAM_CHECKBOXES__', buildCheckboxes(names))
-    .replace('__EDNS_CAPS_TABLE__', buildCapsTable(upstreams));
-}
-
 // ── Exports ────────────────────────────────────────────────────────
 
 /**
@@ -327,20 +318,6 @@ export function serveHomepage(request, upstreams, names) {
 export function serveHomepageEn(request, upstreams, names) {
   const host = new URL(request.url).host;
   return new Response(inject(HTML_EN, host, upstreams, names), {
-    status: 200,
-    headers: { 'Content-Type': 'text/html;charset=utf-8' },
-  });
-}
-
-/**
- * Serve English homepage.
- * @param {Request} request
- * @param {object} upstreams  UPSTREAMS config object
- * @returns {Response}
- */
-export function serveHomepageEn(request, upstreams) {
-  const host = new URL(request.url).host;
-  return new Response(inject(HTML_EN, host, upstreams), {
     status: 200,
     headers: { 'Content-Type': 'text/html;charset=utf-8' },
   });
