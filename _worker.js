@@ -203,7 +203,7 @@ async function concurrentAll(body, clientIP, mode, queryString) {
   const hasEcs = mode !== 'keep' || detectECS(body);
   const started = Date.now();
   const deadline = started + HARD_TIMEOUT_MS;
-  const protectEnd = hasEcs ? started + ECS_PROTECT_MS : 0;
+  const protectEnd = hasEcs ? (mode === 'plus' ? deadline : started + ECS_PROTECT_MS) : 0;
 
   // Fire all upstreams concurrently, each wrapped to capture result
   const pending = Object.entries(UPSTREAMS).map(([name, cfg]) => ({
