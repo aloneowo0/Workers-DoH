@@ -69,7 +69,7 @@ footer a{color:var(--primary-color)}
     <h3>主要功能</h3>
     <ul>
       <li><strong>多上游并发</strong>：/mix 端点同时查询所有上游，返回最快响应</li>
-       <li><strong>EDNS 支持</strong>：mode=keep 透传原始 EDNS，mode=auto 智能补全 ECS（默认），mode=plus 强制补全</li>
+       <li><strong>EDNS 支持</strong>：自动智能补全 ECS 客户端子网</li>
       <li><strong>灵活路由</strong>：每个上游独立路径，可单独使用</li>
       <li><strong>零配置部署</strong>：基于 Cloudflare Worker/Pages，无需服务器</li>
     </ul>
@@ -101,12 +101,6 @@ footer a{color:var(--primary-color)}
     <h3>并发模式</h3>
     <pre><code>curl "https://__HOST__/mix/query-dns?name=example.com&type=A"
 # 全部上游并发，返回最快有效响应</code></pre>
-    <h3>透传模式</h3>
-    <pre><code>curl "https://__HOST__/mix/query-dns?name=example.com&mode=keep"
-# 保留请求中的原始 EDNS 数据</code></pre>
-    <h3>补全 EDNS</h3>
-    <pre><code>curl "https://__HOST__/mix/query-dns?name=example.com&mode=plus"
-# 自动注入客户端子网 EDNS</code></pre>
     <h3>单上游查询</h3>
     <pre><code>curl "https://__HOST__/google/query-dns?name=example.com"
 curl "https://__HOST__/cloudflare/query-dns?name=example.com"</code></pre>
@@ -206,7 +200,7 @@ footer a{color:var(--primary-color)}
     <h3>Key Features</h3>
     <ul>
       <li><strong>Multi-upstream race</strong>: /mix endpoint queries all upstreams concurrently, returns the fastest valid response</li>
-      <li><strong>EDNS control</strong>: mode=keep passes through original EDNS, mode=auto intelligently fills ECS (default), mode=plus forces full extension</li>
+      <li><strong>EDNS control</strong>: automatically injects ECS client-subnet for geo-optimized resolution</li>
       <li><strong>Flexible routing</strong>: Each upstream at its own dedicated path</li>
       <li><strong>Zero-config deploy</strong>: Cloudflare Worker/Pages, no server maintenance</li>
     </ul>
@@ -238,12 +232,6 @@ footer a{color:var(--primary-color)}
     <h3>Concurrent mode</h3>
     <pre><code>curl "https://__HOST__/mix/query-dns?name=example.com&type=A"
 # Queries all upstreams, returns fastest response</code></pre>
-    <h3>Passthrough mode</h3>
-    <pre><code>curl "https://__HOST__/mix/query-dns?name=example.com&mode=keep"
-# Preserves original EDNS from the request</code></pre>
-    <h3>EDNS injection</h3>
-    <pre><code>curl "https://__HOST__/mix/query-dns?name=example.com&mode=plus"
-# Injects client-subnet EDNS automatically</code></pre>
     <h3>Single upstream</h3>
     <pre><code>curl "https://__HOST__/google/query-dns?name=example.com"
 curl "https://__HOST__/cloudflare/query-dns?name=example.com"</code></pre>
@@ -304,14 +292,13 @@ function inject(html, host, upstreams, names) {
 
 function buildCapsTable(upstreams) {
   if (!upstreams || Object.keys(upstreams).length === 0) return '<em>none</em>';
-  let rows = '<table class="caps-table"><thead><tr><th>Upstream</th><th>ECS</th><th>Plus</th></tr></thead><tbody>';
+  let rows = '<table class="caps-table"><thead><tr><th>Upstream</th><th>ECS</th></tr></thead><tbody>';
   for (const [name, cfg] of Object.entries(upstreams)) {
     const ecs = cfg.ecs ? '<span class="yes">\u2705</span>' : '<span class="no">\u2716</span>';
-    const plus = cfg.plus ? '<span class="yes">\u2705</span>' : '<span class="no">\u2716</span>';
-    rows += `<tr><td><strong>${name}</strong></td><td>${ecs}</td><td>${plus}</td></tr>`;
+    rows += `<tr><td><strong>${name}</strong></td><td>${ecs}</td></tr>`;
   }
   rows += '</tbody></table>';
-  rows += '<p style="font-size:.78em;color:#888;margin-top:6px">ECS = 支持 EDNS Client-Subnet（地理位置优化） Plus = 支持 UDP 4096 + DO + ECS + Padding 完整 EDNS 扩展</p>';
+  rows += '<p style="font-size:.78em;color:#888;margin-top:6px">ECS = 支持 EDNS Client-Subnet（地理位置优化）</p>';
   return rows;
 }
 

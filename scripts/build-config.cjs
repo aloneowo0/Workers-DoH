@@ -6,16 +6,16 @@ const path = require('path');
 
 // ── 预设上游的 URL 和 EDNS 能力 ──────────────────────────────────
 const PRESETS = {
-    google:     { url: 'https://dns.google/dns-query',         ecs: true,  plus: true  },
-    cloudflare: { url: 'https://cloudflare-dns.com/dns-query', ecs: true,  plus: true  },
-    quad9:      { url: 'https://dns11.quad9.net/dns-query',   ecs: true,  plus: true  },
-    adguard:    { url: 'https://dns.adguard-dns.com/dns-query', ecs: true,  plus: true  },
-    opendns:    { url: 'https://dns.opendns.com/dns-query',   ecs: true,  plus: true  },
-    yandex:     { url: 'https://common.dot.dns.yandex.net/dns-query', ecs: false, plus: false },
-    dnspod:     { url: 'https://sm2.doh.pub/dns-query',       ecs: true,  plus: true  },
-    alidns:     { url: 'https://dns.alidns.com/dns-query',    ecs: true,  plus: true  },
-    360:        { url: 'https://doh.360.cn/dns-query',        ecs: true,  plus: true  },
-    nextdns:    { url: 'https://dns.nextdns.io',              ecs: true,  plus: true  },
+    google:     { url: 'https://dns.google/dns-query',         ecs: true  },
+    cloudflare: { url: 'https://cloudflare-dns.com/dns-query', ecs: true  },
+    quad9:      { url: 'https://dns11.quad9.net/dns-query',   ecs: true  },
+    adguard:    { url: 'https://dns.adguard-dns.com/dns-query', ecs: true  },
+    opendns:    { url: 'https://dns.opendns.com/dns-query',   ecs: true  },
+    yandex:     { url: 'https://common.dot.dns.yandex.net/dns-query', ecs: false },
+    dnspod:     { url: 'https://sm2.doh.pub/dns-query',       ecs: true  },
+    alidns:     { url: 'https://dns.alidns.com/dns-query',    ecs: true  },
+    360:        { url: 'https://doh.360.cn/dns-query',        ecs: true  },
+    nextdns:    { url: 'https://dns.nextdns.io',              ecs: true  },
 };
 
 // ── 解析 .env ─────────────────────────────────────────────────────
@@ -58,7 +58,7 @@ function buildUpstreams(env) {
             console.warn(`Skip invalid custom upstream name: ${key} → ${name}`);
             continue;
         }
-        upstreams[name] = { url, ecs: true, plus: true };
+        upstreams[name] = { url, ecs: true };
     }
 
     return upstreams;
@@ -114,7 +114,7 @@ function parseIPv6(ip) {
 function generateConfig(env, upstreams) {
     const entries = Object.entries(upstreams)
         .map(([name, cfg]) => {
-            return `    ${name}: { url: '${cfg.url}', ecs: ${cfg.ecs}, plus: ${cfg.plus} },`;
+            return `    ${name}: { url: '${cfg.url}', ecs: ${cfg.ecs} },`;
         })
         .join('\n');
 
@@ -146,8 +146,6 @@ export const ECS_PREFIX6 = ${env.ECS_PREFIX6 || 56};
 
 export const BLOCKED_RANGES = ${blockedStr};
 
-export const EDNS_MODES = ['keep', 'auto', 'plus'];
-export const DEFAULT_MODE = 'auto';
 export const MIX_PROVIDER = 'mix';
 `;
 }
