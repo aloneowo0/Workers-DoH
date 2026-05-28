@@ -5,17 +5,11 @@ const TYPE_A = 1;
 const TYPE_OPT = 41;
 const TYPE_AAAA = 28;
 const OPT_ECS = 8;
-const OPT_PADDING = 12;
 const UDP_PAYLOAD_SIZE = 4096;
 const DO_BIT = 0x8000;
-const PADDING_BLOCK = 128;
 const MAX_NAME_JUMPS = 128;
 
-export function keepMode(body) {
-    return body;
-}
-
-export function autoMode(body, clientIP) {
+function autoMode(body, clientIP) {
     try {
         const ecs = makeEcsOption(clientIP);
         if (!ecs) return body;
@@ -32,45 +26,23 @@ export function autoMode(body, clientIP) {
     }
 }
 
-export function plusMode(body, clientIP) {
+export function prepareQuery(body, clientIP) {
     try {
-        const ecs = makeEcsOption(clientIP);
-        if (!ecs) return body;
+        const prepared = autoMode(body, clientIP);
+        let packet = parseDns(prepared);
 
-        let packet = parseDns(body);
-        let changed = false;
-        let bytes = packet.bytes;
-
-        if (!packet.opt) {
-            const baseLen = bytes.length + 11 + ecs.length;
-            const options = joinBytes(ecs, makePaddingOption(baseLen));
-            return appendOpt(packet, options, DO_BIT).buffer;
-        }
+        if (!packet.opt) return appendOpt(packet, new Uint8Array(0), DO_BIT).buffer;
 
         const ttl = packet.view.getUint32(packet.opt.headerOffset + 4);
         if (packet.opt.cls !== UDP_PAYLOAD_SIZE || (ttl & DO_BIT) === 0) {
-            bytes = new Uint8Array(bytes);
+            const bytes = new Uint8Array(packet.bytes);
             const view = new DataView(bytes.buffer);
             view.setUint16(packet.opt.headerOffset + 2, UDP_PAYLOAD_SIZE);
             view.setUint32(packet.opt.headerOffset + 4, ttl | DO_BIT);
-            packet = parseDns(bytes.buffer);
-            changed = true;
+            return bytes.buffer;
         }
 
-        let options = readOptions(packet.view, packet.opt);
-        if (!options.hasEcs) {
-            bytes = appendOption(packet, packet.opt, ecs);
-            packet = parseDns(bytes.buffer);
-            changed = true;
-        }
-
-        options = readOptions(packet.view, packet.opt);
-        if (!options.hasPadding) {
-            bytes = appendOption(packet, packet.opt, makePaddingOption(packet.bytes.length));
-            changed = true;
-        }
-
-        return changed ? bytes.buffer : body;
+        return prepared;
     } catch (_) {
         return body;
     }
@@ -94,16 +66,6 @@ export function filterAnswers(response) {
     }
 
     return { passed: true, reason: null };
-}
-
-export function detectECS(body) {
-    try {
-        const packet = parseDns(body);
-        if (!packet.opt) return false;
-        return readOptions(packet.view, packet.opt).hasEcs;
-    } catch (_) {
-        return false;
-    }
 }
 
 function parseDns(body) {
@@ -202,7 +164,7 @@ function skipName(view, start) {
 function readOptions(view, opt) {
     let offset = opt.rdataOffset;
     const end = opt.end;
-    const result = { hasEcs: false, hasPadding: false };
+    const result = { hasEcs: false };
 
     while (offset < end) {
         requireBytes(view, offset, 4);
@@ -211,7 +173,6 @@ function readOptions(view, opt) {
         const dataOffset = offset + 4;
         if (dataOffset + len > end) throw new Error('bad EDNS option length');
         if (code === OPT_ECS) result.hasEcs = true;
-        if (code === OPT_PADDING) result.hasPadding = true;
         offset = dataOffset + len;
     }
 
@@ -302,15 +263,6 @@ function makeEcsOption6(ip) {
         option[7 + addrLen] &= (0xFF << (8 - (prefix % 8))) & 0xFF;
     }
 
-    return option;
-}
-
-function makePaddingOption(currentLen) {
-    const paddingLen = (PADDING_BLOCK - ((currentLen + 4) % PADDING_BLOCK)) % PADDING_BLOCK;
-    const option = new Uint8Array(4 + paddingLen);
-    const view = new DataView(option.buffer);
-    view.setUint16(0, OPT_PADDING);
-    view.setUint16(2, paddingLen);
     return option;
 }
 
