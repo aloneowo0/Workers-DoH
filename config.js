@@ -4,14 +4,14 @@
  */
 
 export const UPSTREAMS = {
-    google: { url: 'https://dns.google/dns-query', ecs: true, plus: true },
-    cloudflare: { url: 'https://cloudflare-dns.com/dns-query', ecs: true, plus: true },
-    quad9: { url: 'https://dns11.quad9.net/dns-query', ecs: true, plus: true },
-    adguard: { url: 'https://dns.adguard-dns.com/dns-query', ecs: true, plus: true },
-    opendns: { url: 'https://dns.opendns.com/dns-query', ecs: true, plus: true },
-    dnspod: { url: 'https://sm2.doh.pub/dns-query', ecs: true, plus: true },
-    alidns: { url: 'https://dns.alidns.com/dns-query', ecs: true, plus: true },
-    nextdns: { url: 'https://dns.nextdns.io', ecs: true, plus: true },
+    google: { url: 'https://dns.google/dns-query', ecs: true },
+    cloudflare: { url: 'https://cloudflare-dns.com/dns-query', ecs: true },
+    quad9: { url: 'https://dns11.quad9.net/dns-query', ecs: true },
+    adguard: { url: 'https://dns.adguard-dns.com/dns-query', ecs: true },
+    opendns: { url: 'https://dns.opendns.com/dns-query', ecs: true },
+    dnspod: { url: 'https://sm2.doh.pub/dns-query', ecs: true },
+    alidns: { url: 'https://dns.alidns.com/dns-query', ecs: true },
+    nextdns: { url: 'https://dns.nextdns.io', ecs: true },
 };
 
 export const ECS_PROTECT_MS = 20;
@@ -24,8 +24,6 @@ export const BLOCKED_RANGES = [
     { family: 4, addr: [0, 0, 0, 0], mask: 32 },
     { family: 6, mask: 128 },
     { family: 6, addr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], mask: 128 }
-];;
+];
 
-export const EDNS_MODES = ['keep', 'auto', 'plus'];
-export const DEFAULT_MODE = 'auto';
 export const MIX_PROVIDER = 'mix';
