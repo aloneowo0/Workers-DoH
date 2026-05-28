@@ -90,7 +90,7 @@ export function filterAnswers(response) {
             }
         }
     } catch (_) {
-        return { passed: true, reason: null };
+        return { passed: false, reason: 'parse_error' };
     }
 
     return { passed: true, reason: null };
