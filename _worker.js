@@ -17,6 +17,7 @@ export default {
           ? serveHomepageEn(request, UPSTREAMS, upstreamNames)
           : serveHomepage(request, UPSTREAMS, upstreamNames);
       }
+      if (route.health) return healthResponse(upstreamNames);
       if (route.error) return jsonError(route.error);
 
       const acceptHeader = request.headers.get('Accept') || '';
@@ -301,6 +302,15 @@ function dnsResponse(body, upstreamTime) {
 
 function jsonError(error, status = 400) {
   return new Response(JSON.stringify({ error }), { status, headers: JSON_HEADERS });
+}
+
+function healthResponse(upstreamNames) {
+  return new Response(JSON.stringify({
+    status: 'ok',
+    upstreams: upstreamNames,
+    hardTimeoutMs: HARD_TIMEOUT_MS,
+    ecsProtectMs: ECS_PROTECT_MS,
+  }), { headers: JSON_HEADERS });
 }
 
 function sleep(ms) {

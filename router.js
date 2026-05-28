@@ -11,6 +11,10 @@ export function resolveRoute(request) {
     return { home: true };
   }
 
+  if (pathname === '/health') {
+    return { health: true };
+  }
+
   // Legacy v1 compat: bare /query-dns without a provider prefix
   if (pathname === '/query-dns') {
     return { provider: MIX_PROVIDER, mode: DEFAULT_MODE, queryString: search, path: pathname };
