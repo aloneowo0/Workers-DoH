@@ -28,11 +28,9 @@ export const BLOCKED_RANGES = [
 
 export const MIX_PROVIDER = 'mix';
 
-// ── 地区优化解析 ───────────────────────────────────────────
+// ── 地区优化解析（REGION 非空时 ECH 自动启用） ──────────
 export const REGION = "CN";
+export const ENABLE_ECH = true;
 export const PREFERRED_DOMAIN = "cf.090227.xyz";
 export const FORCE_REMAP_DOMAINS = ["twimg.com","twitter.com","x.com","t.co"];
-
-// ── ECH 支持 ───────────────────────────────────────────────
-export const ENABLE_ECH = true;
 export const ECH_FETCH_DOMAIN = "cloudflare-ech.com";

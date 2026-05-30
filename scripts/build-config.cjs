@@ -139,9 +139,9 @@ function generateConfig(env, upstreams) {
     const ecsPrefix4 = parseInt(env.ECS_PREFIX4, 10);
     const ecsPrefix6 = parseInt(env.ECS_PREFIX6, 10);
 
-    // ECH / 地区优化解析配置
+    // 地区优化解析（ECH 由 REGION 触发）
     const region = env.REGION || '';
-    const enableEch = env.ENABLE_ECH === 'true';
+    const enableEch = region !== '';
     const echFetchDomain = env.ECH_FETCH_DOMAIN || 'cloudflare-ech.com';
     const preferredDomain = env.PREFERRED_DOMAIN || '';
     const forceRemapDomains = (env.FORCE_REMAP_DOMAINS || '')
@@ -166,13 +166,11 @@ export const BLOCKED_RANGES = ${blockedStr};
 
 export const MIX_PROVIDER = 'mix';
 
-// ── 地区优化解析 ───────────────────────────────────────────
+// ── 地区优化解析（REGION 非空时 ECH 自动启用） ──────────
 export const REGION = ${JSON.stringify(region)};
+export const ENABLE_ECH = ${enableEch};
 export const PREFERRED_DOMAIN = ${JSON.stringify(preferredDomain)};
 export const FORCE_REMAP_DOMAINS = ${JSON.stringify(forceRemapDomains)};
-
-// ── ECH 支持 ───────────────────────────────────────────────
-export const ENABLE_ECH = ${enableEch};
 export const ECH_FETCH_DOMAIN = ${JSON.stringify(echFetchDomain)};
 `;
 }
