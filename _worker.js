@@ -38,7 +38,12 @@ export default {
       const clientIP = request.headers.get('CF-Connecting-IP');
       const queryMeta = parseQueryMeta(body);
       if (queryMeta && shouldRemap(queryMeta.name)) {
-        const remapped = await remapResponse(body, queryMeta.name, queryMeta.type, PREFERRED_DOMAIN);
+        let echRdata = null;
+        if (queryMeta.type === 65 && ENABLE_ECH) {
+          const cfEch = await fetchCFEch(null, null);
+          if (cfEch && cfEch.rdata) echRdata = cfEch.rdata;
+        }
+        const remapped = await remapResponse(body, queryMeta.name, queryMeta.type, PREFERRED_DOMAIN, echRdata);
         if (remapped !== null) return dnsResponse(remapped);
       }
       if (route.provider === MIX_PROVIDER) {
