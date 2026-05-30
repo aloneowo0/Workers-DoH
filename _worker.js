@@ -4,12 +4,13 @@ import { serveHomepage, serveHomepageEn } from './homepage.js';
 import { resolveRoute } from './router.js';
 import { fetchCFEch, injectECH } from './ech-inject.js';
 import { remapResponse, resolvePreferredIPs } from './domain-map.js';
-import { probeOwner } from './cdn-detect.js';
+import { probeOwner, detectOwner } from './cdn-detect.js';
 
 const DNS_HEADERS = { 'Content-Type': 'application/dns-message' };
 const JSON_HEADERS = { 'Content-Type': 'application/json;charset=utf-8' };
 
 let _regionActive = false;
+let _activePref = '';
 
 export default {
   async fetch(request) {
@@ -43,6 +44,7 @@ export default {
       const regionCfg = REGION_CONFIG && REGION_CONFIG[clientCountry];
       const regionActive = !!(regionCfg && regionCfg.preferred);
       _regionActive = !!(regionCfg && regionCfg.ech);
+      _activePref = activePref;
       const activePref = regionCfg ? regionCfg.preferred : '';
 
       const remapDomains = regionCfg ? regionCfg.remap.map(d => d.toLowerCase()) : [];
@@ -317,18 +319,80 @@ function answersPass(responseBody) {
 }
 
 async function postProcessBody(responseBody, queryMeta) {
-  if (!_regionActive || !queryMeta || queryMeta.type !== 65) return responseBody;
+  if (!_regionActive || !queryMeta) return responseBody;
+
+  if (queryMeta.type === 65) {
+    try {
+      const cfEch = await fetchCFEch(null, null);
+      const ownerResult = await probeOwner(queryMeta.name);
+      if (ownerResult && ownerResult.owner) {
+        const injected = await injectECH(responseBody, queryMeta.name, ownerResult.owner, cfEch);
+        if (injected) {
+          const bytes = injected instanceof Response ? await injected.arrayBuffer() : injected;
+          if (bytes) return bytes;
+        }
+      }
+    } catch (_) {}
+    return responseBody;
+  }
+
+  if ((queryMeta.type === 1 || queryMeta.type === 28) && _activePref) {
+    try {
+      const ips = extractIps(responseBody);
+      if (ips.some(function (ip) { return detectOwner(ip) === 'CF'; })) {
+        const preferred = await resolvePreferredIPs(_activePref, queryMeta.type);
+        if (preferred && preferred.length > 0) {
+          return buildDNS(queryMeta.id, queryMeta.name, queryMeta.type, preferred, 60);
+        }
+      }
+    } catch (_) {}
+  }
+
+  return responseBody;
+}
+
+function extractIps(buffer) {
+  const ips = [];
   try {
-    const ownerResult = await probeOwner(queryMeta.name);
-    if (!ownerResult || !ownerResult.owner) return responseBody;
-    const cfEch = await fetchCFEch(null, null);
-    const injected = await injectECH(responseBody, queryMeta.name, ownerResult.owner, cfEch);
-    if (injected) {
-      const bytes = injected instanceof Response ? await injected.arrayBuffer() : injected;
-      if (bytes) return bytes;
+    const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    if (bytes.length < 12) return ips;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const ancount = view.getUint16(6);
+    let offset = 12;
+    for (let i = 0; i < view.getUint16(4); i++) {
+      while (offset < bytes.length) {
+        const b = bytes[offset];
+        if (b === 0) { offset++; break; }
+        if ((b & 0xC0) === 0xC0) { offset += 2; break; }
+        offset += b + 1;
+      }
+      offset += 4;
+    }
+    for (let i = 0; i < ancount; i++) {
+      if (offset + 12 > bytes.length) break;
+      let b = bytes[offset];
+      if ((b & 0xC0) === 0xC0) { offset += 2; }
+      else {
+        while (b !== 0) {
+          if ((b & 0xC0) === 0xC0) { offset += 1; break; }
+          offset += b + 1;
+          b = bytes[offset];
+        }
+        offset++;
+      }
+      const type = view.getUint16(offset); offset += 8;
+      const rdlen = view.getUint16(offset); offset += 2;
+      if (type === 1 && rdlen === 4) {
+        ips.push(bytes[offset] + '.' + bytes[offset+1] + '.' + bytes[offset+2] + '.' + bytes[offset+3]);
+      } else if (type === 28 && rdlen === 16) {
+        const p = [];
+        for (let j = 0; j < 16; j += 2) p.push(((bytes[offset+j] << 8) | bytes[offset+j+1]).toString(16));
+        ips.push(p.join(':'));
+      }
+      offset += rdlen;
     }
   } catch (_) {}
-  return responseBody;
+  return ips;
 }
 
 function isMetaDomain(name) {
