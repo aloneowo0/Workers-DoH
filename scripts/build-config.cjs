@@ -153,7 +153,6 @@ function generateConfig(env, upstreams) {
     const defaultPrefDomain = env.PREFERRED_DOMAIN || '';
     const defaultRemap = (env.FORCE_REMAP_DOMAINS || '')
         .split(/[\s,]+/).filter(d => d.length > 0);
-    const echFetchDomain = env.ECH_FETCH_DOMAIN || 'cloudflare-ech.com';
 
     // 按地区块解析 REGION_<XX>_PREFERRED / REGION_<XX>_REMAP / REGION_<XX>_ECH
     const regionConfig = {};
@@ -189,7 +188,6 @@ export const MIX_PROVIDER = 'mix';
 // ── 地区优化解析（REGION 非空时 ECH 自动启用） ──────────
 export const REGION = ${JSON.stringify(region)};
 export const ENABLE_ECH = ${enableEch};
-export const ECH_FETCH_DOMAIN = ${JSON.stringify(echFetchDomain)};
 export const REGION_CONFIG = ${regionConfigStr};
 `;
 }

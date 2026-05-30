@@ -1,4 +1,4 @@
-import { ECS_PROTECT_MS, HARD_TIMEOUT_MS, MIX_PROVIDER, UPSTREAMS, ENABLE_ECH, REGION, REGION_CONFIG, ECH_FETCH_DOMAIN } from './config.js';
+import { ECS_PROTECT_MS, HARD_TIMEOUT_MS, MIX_PROVIDER, UPSTREAMS, ENABLE_ECH, REGION, REGION_CONFIG } from './config.js';
 import { prepareQuery, filterAnswers } from './edns.js';
 import { serveHomepage, serveHomepageEn } from './homepage.js';
 import { resolveRoute } from './router.js';
