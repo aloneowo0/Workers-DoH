@@ -27,3 +27,13 @@ export const BLOCKED_RANGES = [
 ];;
 
 export const MIX_PROVIDER = 'mix';
+
+// ── ECH 注入配置 ─────────────────────────────────────────────
+export const ENABLE_ECH = true;
+export const ECH_FETCH_DOMAIN = "cloudflare-ech.com";
+
+// ── 优选 IP 配置 ─────────────────────────────────────────────
+export const PREFERRED_DOMAIN = "cf.090227.xyz";
+
+// ── 强制映射域名列表（如 X/Twitter） ─────────────────────────
+export const FORCE_REMAP_DOMAINS = ["twimg.com","twitter.com","x.com","t.co"];

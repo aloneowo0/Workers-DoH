@@ -1,7 +1,10 @@
-import { ECS_PROTECT_MS, HARD_TIMEOUT_MS, MIX_PROVIDER, UPSTREAMS } from './config.js';
+import { ECS_PROTECT_MS, HARD_TIMEOUT_MS, MIX_PROVIDER, UPSTREAMS, ENABLE_ECH, PREFERRED_DOMAIN } from './config.js';
 import { prepareQuery, filterAnswers } from './edns.js';
 import { serveHomepage, serveHomepageEn } from './homepage.js';
 import { resolveRoute } from './router.js';
+import { fetchCFEch, injectECH } from './ech-inject.js';
+import { shouldRemap, remapResponse } from './domain-map.js';
+import { probeOwner } from './cdn-detect.js';
 
 const DNS_HEADERS = { 'Content-Type': 'application/dns-message' };
 const JSON_HEADERS = { 'Content-Type': 'application/json;charset=utf-8' };
@@ -33,10 +36,15 @@ export default {
         body = await request.clone().arrayBuffer();
       }
       const clientIP = request.headers.get('CF-Connecting-IP');
-      if (route.provider === MIX_PROVIDER) {
-        return await concurrentAll(body, clientIP);
+      const queryMeta = parseQueryMeta(body);
+      if (queryMeta && shouldRemap(queryMeta.name)) {
+        const remapped = await remapResponse(body, queryMeta.name, queryMeta.type, PREFERRED_DOMAIN);
+        if (remapped !== null) return dnsResponse(remapped);
       }
-      return await singleUpstream(route.provider, body, clientIP);
+      if (route.provider === MIX_PROVIDER) {
+        return await concurrentAll(body, clientIP, queryMeta);
+      }
+      return await singleUpstream(route.provider, body, clientIP, queryMeta);
     } catch (_) {
       return body ? dnsResponse(servfail(body)) : jsonError('internal_error', 500);
     }
@@ -90,6 +98,30 @@ function buildQueryFromURL(url) {
   return out.buffer;
 }
 
+function parseQueryMeta(body) {
+  try {
+    const bytes = body instanceof ArrayBuffer ? new Uint8Array(body) : new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+    if (bytes.length < 12) return null;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const id = view.getUint16(0);
+    let offset = 12;
+    const labels = [];
+    for (let jumps = 0; jumps < 128; jumps++) {
+      if (offset >= bytes.length) return null;
+      const len = bytes[offset];
+      if ((len & 0xC0) === 0xC0) { offset += 2; break; }
+      if (len === 0) { offset++; break; }
+      offset++;
+      labels.push(new TextDecoder().decode(bytes.subarray(offset, offset + len)));
+      offset += len;
+    }
+    const qType = view.getUint16(offset);
+    return { id, name: labels.join('.'), type: qType };
+  } catch (_) {
+    return null;
+  }
+}
+
 async function rfc8484Passthrough(route, request) {
   let target = route.provider === MIX_PROVIDER
     ? (UPSTREAMS['google'] || Object.values(UPSTREAMS)[0])
@@ -122,7 +154,7 @@ async function rfc8484Passthrough(route, request) {
   }
 }
 
-async function singleUpstream(provider, body, clientIP) {
+async function singleUpstream(provider, body, clientIP, queryMeta) {
   const upstream = UPSTREAMS[provider];
   if (!upstream) return dnsResponse(servfail(body));
   const queryBody = prepareQuery(body, clientIP);
@@ -135,13 +167,25 @@ async function singleUpstream(provider, body, clientIP) {
     });
     const responseBody = await response.arrayBuffer();
     const elapsed = Date.now() - started;
-    if (response.status === 200 && answersPass(responseBody)) return dnsResponse(responseBody, elapsed);
+    let finalBody = responseBody;
+    if (ENABLE_ECH && queryMeta && queryMeta.type === 65) {
+      const ownerResult = await probeOwner(queryMeta.name);
+      if (ownerResult && ownerResult.owner) {
+        const cfEch = await fetchCFEch(null, null);
+        const injected = await injectECH(finalBody, queryMeta.name, ownerResult.owner, cfEch);
+        if (injected) {
+          const injectedBytes = injected instanceof Response ? await injected.arrayBuffer() : injected;
+          if (injectedBytes) finalBody = injectedBytes;
+        }
+      }
+    }
+    if (response.status === 200 && answersPass(finalBody)) return dnsResponse(finalBody, elapsed);
     return dnsResponse(servfail(body, 17, 'Filtered'), elapsed);
   } catch (_) {}
   return dnsResponse(servfail(body));
 }
 
-async function concurrentAll(body, clientIP) {
+async function concurrentAll(body, clientIP, queryMeta) {
   const started = Date.now();
   const deadline = started + HARD_TIMEOUT_MS;
   const protectEnd = started + ECS_PROTECT_MS;
@@ -162,7 +206,8 @@ async function concurrentAll(body, clientIP) {
     if (!inProtect && held.length > 0) {
       held.sort((a, b) => a.result.time - b.result.time);
       const best = held[0];
-      return dnsResponse(best.result.response, best.result.time);
+      const processed = await postProcessBody(best.result.response, queryMeta);
+      return dnsResponse(processed, best.result.time);
     }
 
     const remaining = (inProtect ? protectEnd : deadline) - Date.now();
@@ -186,7 +231,8 @@ async function concurrentAll(body, clientIP) {
     if (inProtect) {
       // 保护窗内：ECS+有效 → 立即返回；非ECS+有效 → 暂存
       if (settled.value.ecs && settled.value.result.valid) {
-        return dnsResponse(settled.value.result.response, settled.value.result.time);
+        const processed = await postProcessBody(settled.value.result.response, queryMeta);
+        return dnsResponse(processed, settled.value.result.time);
       }
       if (settled.value.result.valid) {
         held.push(settled.value);
@@ -196,14 +242,16 @@ async function concurrentAll(body, clientIP) {
 
     // 保护窗后：任意有效响应直接返回
     if (settled.value.result.valid) {
-      return dnsResponse(settled.value.result.response, settled.value.result.time);
+      const processed = await postProcessBody(settled.value.result.response, queryMeta);
+      return dnsResponse(processed, settled.value.result.time);
     }
   }
 
   // 硬超时：最后检查一次暂存
   if (held.length > 0) {
     held.sort((a, b) => a.result.time - b.result.time);
-    return dnsResponse(held[0].result.response, held[0].result.time);
+    const processed = await postProcessBody(held[0].result.response, queryMeta);
+    return dnsResponse(processed, held[0].result.time);
   }
 
   return dnsResponse(servfail(body, 22, 'No reachable upstream'), Date.now() - started);
@@ -226,6 +274,21 @@ async function queryUpstream(url, body, started) {
 function answersPass(responseBody) {
   const result = filterAnswers(responseBody);
   return result !== false && result?.passed !== false;
+}
+
+async function postProcessBody(responseBody, queryMeta) {
+  if (!ENABLE_ECH || !queryMeta || queryMeta.type !== 65) return responseBody;
+  try {
+    const ownerResult = await probeOwner(queryMeta.name);
+    if (!ownerResult || !ownerResult.owner) return responseBody;
+    const cfEch = await fetchCFEch(null, null);
+    const injected = await injectECH(responseBody, queryMeta.name, ownerResult.owner, cfEch);
+    if (injected) {
+      const bytes = injected instanceof Response ? await injected.arrayBuffer() : injected;
+      if (bytes) return bytes;
+    }
+  } catch (_) {}
+  return responseBody;
 }
 
 function dnsResponse(body, upstreamTime) {

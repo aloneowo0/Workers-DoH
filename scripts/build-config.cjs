@@ -139,6 +139,14 @@ function generateConfig(env, upstreams) {
     const ecsPrefix4 = parseInt(env.ECS_PREFIX4, 10);
     const ecsPrefix6 = parseInt(env.ECS_PREFIX6, 10);
 
+    // ECH / 域名映射配置
+    const enableEch = env.ENABLE_ECH === 'true';
+    const echFetchDomain = env.ECH_FETCH_DOMAIN || 'cloudflare-ech.com';
+    const preferredDomain = env.PREFERRED_DOMAIN || '';
+    const forceRemapDomains = (env.FORCE_REMAP_DOMAINS || '')
+        .split(/[\s,]+/)
+        .filter(d => d.length > 0);
+
     return `/**
  * Workers-DoH — 配置文件（由 scripts/build-config.cjs 自动生成）
  * 不要手动编辑此文件，修改 .env 后重新运行构建脚本。
@@ -156,6 +164,16 @@ export const ECS_PREFIX6 = ${isNaN(ecsPrefix6) ? 56 : ecsPrefix6};
 export const BLOCKED_RANGES = ${blockedStr};
 
 export const MIX_PROVIDER = 'mix';
+
+// ── ECH 注入配置 ─────────────────────────────────────────────
+export const ENABLE_ECH = ${enableEch};
+export const ECH_FETCH_DOMAIN = ${JSON.stringify(echFetchDomain)};
+
+// ── 优选 IP 配置 ─────────────────────────────────────────────
+export const PREFERRED_DOMAIN = ${JSON.stringify(preferredDomain)};
+
+// ── 强制映射域名列表（如 X/Twitter） ─────────────────────────
+export const FORCE_REMAP_DOMAINS = ${JSON.stringify(forceRemapDomains)};
 `;
 }
 
