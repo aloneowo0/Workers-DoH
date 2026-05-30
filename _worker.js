@@ -46,6 +46,13 @@ export default {
         const remapped = await remapResponse(body, queryMeta.name, queryMeta.type, PREFERRED_DOMAIN, echRdata);
         if (remapped !== null) return dnsResponse(remapped);
       }
+      if (queryMeta && queryMeta.type === 65 && ENABLE_ECH && isMetaDomain(queryMeta.name)) {
+        const injected = await injectECH(body, queryMeta.name, 'META', null);
+        if (injected) {
+          const bytes = injected instanceof Response ? await injected.arrayBuffer() : injected;
+          if (bytes) return dnsResponse(bytes);
+        }
+      }
       if (route.provider === MIX_PROVIDER) {
         return await concurrentAll(body, clientIP, queryMeta);
       }
@@ -294,6 +301,13 @@ async function postProcessBody(responseBody, queryMeta) {
     }
   } catch (_) {}
   return responseBody;
+}
+
+function isMetaDomain(name) {
+  const domains = ['facebook.com','fbcdn.net','instagram.com','cdninstagram.com','messenger.com','whatsapp.com','whatsapp.net','threads.net','meta.com','oculus.com','fbsbx.com','thefacebook.com','connect.facebook.net'];
+  try {
+    return domains.some(function (d) { return name === d || name.endsWith('.' + d); });
+  } catch (_) { return false; }
 }
 
 function dnsResponse(body, upstreamTime) {

@@ -88,7 +88,20 @@ export async function injectECH(originalResponse, queryName, ownerType, echConfi
         if (!body) return originalResponse;
 
         const packet = parseDns(body);
-        if (!packet || packet.header.ancount === 0) return originalResponse;
+        if (!packet) return originalResponse;
+        if (packet.header.ancount === 0) {
+          const params = [];
+          if (echAlpn) params.push({ key: 'alpn', val: echAlpn });
+          params.push({ key: 'ech', val: echValue });
+          const echRdata = packHttpsParams(1, '.', params);
+          const newBody = createDNSResponse(packet.header.id, queryName, TYPE_HTTPS, [echRdata], 300);
+          return new Response(newBody, {
+            headers: {
+              'Content-Type': 'application/dns-message',
+              'Access-Control-Allow-Origin': '*'
+            }
+          });
+        }
 
         const newRdatas = [];
         let ttl = 3600;
