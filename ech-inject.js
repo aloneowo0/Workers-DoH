@@ -51,15 +51,6 @@ export async function fetchCFEch(env, ctx) {
 
         const result = { rdata: rdata, params: params };
         echCache.set(CF_ECH_DOMAIN, { ts: Date.now(), data: result });
-
-        try {
-            if (ctx && ctx.waitUntil && env && env.ECH_CACHE) {
-                ctx.waitUntil(
-                    env.ECH_CACHE.put(CF_ECH_DOMAIN, JSON.stringify(result), { expirationTtl: 600 })
-                );
-            }
-        } catch (_) {}
-
         return result;
     } catch (_) {
         return null;

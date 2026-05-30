@@ -16,44 +16,10 @@ const TYPE_HTTPS = 65;
 const CACHE_TTL = 300_000;
 
 const GOOGLE_DOH_JSON = 'https://dns.google/resolve';
-const DEFAULT_REMAP_DOMAINS = ['twimg.com', 'twitter.com', 'x.com', 't.co'];
-
-let REMAP_DOMAINS = DEFAULT_REMAP_DOMAINS;
-try {
-    const config = await import('./config.js');
-    if (config.TWITTER_DOMAINS && config.TWITTER_DOMAINS.length > 0) {
-        REMAP_DOMAINS = config.TWITTER_DOMAINS;
-    }
-} catch (_) {}
-
 const ipCache = new Map();
 
-/**
- * Check whether a query name matches any Twitter/X remap domain.
- * Matches exact or subdomain (e.g. "api.x.com" matches "x.com").
- */
-export function shouldRemap(name) {
-    try {
-        if (!name) return false;
-        return REMAP_DOMAINS.some(d => name === d || name.endsWith('.' + d));
-    } catch (_) {
-        return false;
-    }
-}
-
-/**
- * If the domain is a Twitter/X domain, return a synthetic DNS response:
- *   - A (1): resolve preferredDomain's IPv4 addresses
- *   - AAAA (28): return empty answer set
- *   - HTTPS (65): inject ECH rdata if provided; otherwise empty
- *   - Other types: return null (caller falls through to normal flow)
- *
- * For non-Twitter domains, returns null immediately.
- */
 export async function remapResponse(originalBody, queryName, queryType, preferredDomain, echRdata) {
     try {
-        if (!shouldRemap(queryName)) return null;
-
         const id = parseQueryId(originalBody);
 
         if (queryType === TYPE_AAAA) {

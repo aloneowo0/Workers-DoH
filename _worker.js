@@ -3,7 +3,7 @@ import { prepareQuery, filterAnswers } from './edns.js';
 import { serveHomepage, serveHomepageEn } from './homepage.js';
 import { resolveRoute } from './router.js';
 import { fetchCFEch, injectECH } from './ech-inject.js';
-import { shouldRemap, remapResponse, resolvePreferredIPs } from './domain-map.js';
+import { remapResponse, resolvePreferredIPs } from './domain-map.js';
 import { probeOwner } from './cdn-detect.js';
 
 const DNS_HEADERS = { 'Content-Type': 'application/dns-message' };
@@ -215,14 +215,25 @@ async function concurrentAll(body, clientIP, queryMeta) {
   const deadline = started + HARD_TIMEOUT_MS;
   const protectEnd = started + ECS_PROTECT_MS;
 
-  // Fire all upstreams concurrently, each wrapped to capture result
-  const pending = Object.entries(UPSTREAMS).map(([name, cfg]) => ({
-    ecs: cfg.ecs,
-    promise: queryUpstream(cfg.url, prepareQuery(body, clientIP), started)
-      .then((r) => ({ ecs: cfg.ecs, result: r })),
-  }));
+  const preparedBody = prepareQuery(body, clientIP);
 
-  const held = [];  // 暂存区：保护窗内到达的非ECS有效响应
+  const pending = Object.entries(UPSTREAMS).map(([name, cfg]) => {
+    const ctrl = new AbortController();
+    return {
+      ecs: cfg.ecs,
+      ctrl,
+      promise: queryUpstream(cfg.url, preparedBody, started, ctrl.signal)
+        .then((r) => ({ ecs: cfg.ecs, result: r })),
+    };
+  });
+
+  const held = [];
+
+  function abortPending() {
+    for (const p of pending) {
+      try { p.ctrl.abort(); } catch (_) {}
+    }
+  }
 
   while (pending.length && Date.now() < deadline) {
     const inProtect = Date.now() < protectEnd;
@@ -232,6 +243,7 @@ async function concurrentAll(body, clientIP, queryMeta) {
       held.sort((a, b) => a.result.time - b.result.time);
       const best = held[0];
       const processed = await postProcessBody(best.result.response, queryMeta);
+      abortPending();
       return dnsResponse(processed, best.result.time);
     }
 
@@ -257,6 +269,7 @@ async function concurrentAll(body, clientIP, queryMeta) {
       // 保护窗内：ECS+有效 → 立即返回；非ECS+有效 → 暂存
       if (settled.value.ecs && settled.value.result.valid) {
         const processed = await postProcessBody(settled.value.result.response, queryMeta);
+        abortPending();
         return dnsResponse(processed, settled.value.result.time);
       }
       if (settled.value.result.valid) {
@@ -268,6 +281,7 @@ async function concurrentAll(body, clientIP, queryMeta) {
     // 保护窗后：任意有效响应直接返回
     if (settled.value.result.valid) {
       const processed = await postProcessBody(settled.value.result.response, queryMeta);
+      abortPending();
       return dnsResponse(processed, settled.value.result.time);
     }
   }
@@ -276,15 +290,16 @@ async function concurrentAll(body, clientIP, queryMeta) {
   if (held.length > 0) {
     held.sort((a, b) => a.result.time - b.result.time);
     const processed = await postProcessBody(held[0].result.response, queryMeta);
+    abortPending();
     return dnsResponse(processed, held[0].result.time);
   }
 
   return dnsResponse(servfail(body, 22, 'No reachable upstream'), Date.now() - started);
 }
 
-async function queryUpstream(url, body, started) {
+async function queryUpstream(url, body, started, signal) {
   try {
-    const response = await fetch(url, { method: 'POST', headers: DNS_HEADERS, body });
+    const response = await fetch(url, { method: 'POST', headers: DNS_HEADERS, body, signal });
     const responseBody = await response.arrayBuffer();
     return {
       response: responseBody,
