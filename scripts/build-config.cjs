@@ -139,7 +139,8 @@ function generateConfig(env, upstreams) {
     const ecsPrefix4 = parseInt(env.ECS_PREFIX4, 10);
     const ecsPrefix6 = parseInt(env.ECS_PREFIX6, 10);
 
-    // ECH / 域名映射配置
+    // ECH / 地区优化解析配置
+    const region = env.REGION || '';
     const enableEch = env.ENABLE_ECH === 'true';
     const echFetchDomain = env.ECH_FETCH_DOMAIN || 'cloudflare-ech.com';
     const preferredDomain = env.PREFERRED_DOMAIN || '';
@@ -165,15 +166,14 @@ export const BLOCKED_RANGES = ${blockedStr};
 
 export const MIX_PROVIDER = 'mix';
 
-// ── ECH 注入配置 ─────────────────────────────────────────────
+// ── 地区优化解析 ───────────────────────────────────────────
+export const REGION = ${JSON.stringify(region)};
+export const PREFERRED_DOMAIN = ${JSON.stringify(preferredDomain)};
+export const FORCE_REMAP_DOMAINS = ${JSON.stringify(forceRemapDomains)};
+
+// ── ECH 支持 ───────────────────────────────────────────────
 export const ENABLE_ECH = ${enableEch};
 export const ECH_FETCH_DOMAIN = ${JSON.stringify(echFetchDomain)};
-
-// ── 优选 IP 配置 ─────────────────────────────────────────────
-export const PREFERRED_DOMAIN = ${JSON.stringify(preferredDomain)};
-
-// ── 强制映射域名列表（如 X/Twitter） ─────────────────────────
-export const FORCE_REMAP_DOMAINS = ${JSON.stringify(forceRemapDomains)};
 `;
 }
 

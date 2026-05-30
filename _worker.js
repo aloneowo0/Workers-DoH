@@ -1,4 +1,4 @@
-import { ECS_PROTECT_MS, HARD_TIMEOUT_MS, MIX_PROVIDER, UPSTREAMS, ENABLE_ECH, PREFERRED_DOMAIN } from './config.js';
+import { ECS_PROTECT_MS, HARD_TIMEOUT_MS, MIX_PROVIDER, UPSTREAMS, ENABLE_ECH, PREFERRED_DOMAIN, REGION } from './config.js';
 import { prepareQuery, filterAnswers } from './edns.js';
 import { serveHomepage, serveHomepageEn } from './homepage.js';
 import { resolveRoute } from './router.js';
@@ -370,6 +370,9 @@ function healthResponse(upstreamNames) {
     upstreams: upstreamNames,
     hardTimeoutMs: HARD_TIMEOUT_MS,
     ecsProtectMs: ECS_PROTECT_MS,
+    region: REGION || null,
+    echEnabled: ENABLE_ECH,
+    preferredDomain: PREFERRED_DOMAIN || null,
   }), { headers: JSON_HEADERS });
 }
 
