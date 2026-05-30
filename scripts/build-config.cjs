@@ -7,7 +7,7 @@ const path = require('path');
 // ── 预设上游的 URL 和 EDNS 能力 ──────────────────────────────────
 const PRESETS = {
     google:     { url: 'https://dns.google/dns-query',         ecs: true  },
-    cloudflare_Pubic: { url: 'https://cloudflare-dns.com/dns-query', ecs: false },
+    cloudflare_Public: { url: 'https://cloudflare-dns.com/dns-query', ecs: false },
     quad9:      { url: 'https://dns11.quad9.net/dns-query',   ecs: true  },
     adguard:    { url: 'https://dns.adguard-dns.com/dns-query', ecs: true  },
     opendns:    { url: 'https://dns.opendns.com/dns-query',   ecs: true  },

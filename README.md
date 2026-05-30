@@ -23,7 +23,7 @@
 | `/dns-query` | 全部已启用上游并发竞速（mix） |
 | `/<provider>/dns-query` | 单上游查询 |
 
-provider 可选值（依 `.env` 启用情况而定）：`google` `cloudflare_Pubic` `quad9` `adguard` `opendns` `dnspod` `alidns` `nextdns` 及自定义 `CUSTOM_*`。
+provider 可选值（依 `.env` 启用情况而定）：`google` `cloudflare_Public` `quad9` `adguard` `opendns` `dnspod` `alidns` `nextdns` 及自定义 `CUSTOM_*`。
 
 支持 DNS 类型：A（默认）、AAAA、HTTPS(65)、SVCB(64)、TXT、MX、CNAME、NS、SOA、PTR。
 
@@ -96,7 +96,7 @@ t=HARD_TIMEOUT_MS
 | 上游 | ECS | URL |
 |------|-----|-----|
 | google | ✅ | dns.google/dns-query |
-| cloudflare_Pubic | ❌ | cloudflare-dns.com/dns-query |
+| cloudflare_Public | ❌ | cloudflare-dns.com/dns-query |
 | quad9 | ✅ | dns11.quad9.net/dns-query |
 | adguard | ✅ | dns.adguard-dns.com/dns-query |
 | opendns | ✅ | dns.opendns.com/dns-query |
@@ -175,6 +175,6 @@ Workers-DoH/
 - **mix 端点保证可用**：单上游可能因网络波动或策略限制返回错误，mix 并发竞速可覆盖这些缺陷。生产使用建议始终走 `/dns-query`。
 - **CF 并发上限**：Workers 免费计划约 6 个并发 subrequest，标准付费约 8-10 个。mix 模式超配额的上游会内部排队，建议启用不超过 8 个上游。
 - **CF-Connecting-IP**：ECS 注入依赖此请求头，仅在 Cloudflare 代理环境下可用。非 CF 环境需自行传入客户端 IP。
-- **cloudflare_Pubic 无 ECS**：该上游不支持 EDNS Client-Subnet，主要用于测试保护窗口的暂存释放机制。
+- **cloudflare_Public 无 ECS**：该上游不支持 EDNS Client-Subnet，主要用于测试保护窗口的暂存释放机制。
 - **自定义上游默认值**：`CUSTOM_*` 默认 `ecs: true`。若上游不支持，需在 `build-config.cjs` 的预设表中调整。
 - **Yandex / 360**：默认关闭，延迟较高或兼容性不佳，按需启用。
