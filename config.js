@@ -29,8 +29,6 @@ export const BLOCKED_RANGES = [
 export const MIX_PROVIDER = 'mix';
 
 // ── 地区优化解析（REGION 非空时 ECH 自动启用） ──────────
-export const REGION = "CN";
+export const REGION = "CN,RU";
 export const ENABLE_ECH = true;
-export const PREFERRED_DOMAIN = "cf.090227.xyz";
-export const FORCE_REMAP_DOMAINS = ["twimg.com","twitter.com","x.com","t.co"];
-export const ECH_FETCH_DOMAIN = "cloudflare-ech.com";
+export const REGION_CONFIG = {"CN":{"preferred":"cf.090227.xyz","remap":["twimg.com","twitter.com","x.com","t.co"],"ech":"cloudflare-ech.com"},"RU":{"preferred":"cf.877774.xyz","remap":["twimg.com","twitter.com","x.com","t.co"],"ech":"cloudflare-ech.com"}};

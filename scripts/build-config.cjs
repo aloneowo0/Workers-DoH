@@ -139,14 +139,29 @@ function generateConfig(env, upstreams) {
     const ecsPrefix4 = parseInt(env.ECS_PREFIX4, 10);
     const ecsPrefix6 = parseInt(env.ECS_PREFIX6, 10);
 
-    // 地区优化解析（ECH 由 REGION 触发）
+    // 地区优化解析
     const region = env.REGION || '';
-    const enableEch = region !== '';
-    const echFetchDomain = env.ECH_FETCH_DOMAIN || 'cloudflare-ech.com';
-    const preferredDomain = env.PREFERRED_DOMAIN || '';
-    const forceRemapDomains = (env.FORCE_REMAP_DOMAINS || '')
-        .split(/[\s,]+/)
-        .filter(d => d.length > 0);
+    const regions = region ? region.split(/[\s,]+/).filter(r => /^[A-Z]{2}$/.test(r)) : [];
+    const enableEch = regions.length > 0;
+
+    // 全局默认值
+    const defaultPrefDomain = env.PREFERRED_DOMAIN || '';
+    const defaultRemap = (env.FORCE_REMAP_DOMAINS || '')
+        .split(/[\s,]+/).filter(d => d.length > 0);
+    const defaultEch = env.ECH_FETCH_DOMAIN || 'cloudflare-ech.com';
+
+    // 按地区块解析 REGION_<XX>_PREFERRED / REGION_<XX>_REMAP / REGION_<XX>_ECH
+    const regionConfig = {};
+    for (const r of regions) {
+        regionConfig[r] = {
+            preferred: env['REGION_' + r + '_PREFERRED'] || defaultPrefDomain,
+            remap: env['REGION_' + r + '_REMAP']
+                ? env['REGION_' + r + '_REMAP'].split(/[\s,]+/).filter(d => d.length > 0)
+                : defaultRemap,
+            ech: env['REGION_' + r + '_ECH'] || defaultEch,
+        };
+    }
+    const regionConfigStr = JSON.stringify(regionConfig);
 
     return `/**
  * Workers-DoH — 配置文件（由 scripts/build-config.cjs 自动生成）
@@ -169,9 +184,7 @@ export const MIX_PROVIDER = 'mix';
 // ── 地区优化解析（REGION 非空时 ECH 自动启用） ──────────
 export const REGION = ${JSON.stringify(region)};
 export const ENABLE_ECH = ${enableEch};
-export const PREFERRED_DOMAIN = ${JSON.stringify(preferredDomain)};
-export const FORCE_REMAP_DOMAINS = ${JSON.stringify(forceRemapDomains)};
-export const ECH_FETCH_DOMAIN = ${JSON.stringify(echFetchDomain)};
+export const REGION_CONFIG = ${regionConfigStr};
 `;
 }
 

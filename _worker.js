@@ -1,4 +1,4 @@
-import { ECS_PROTECT_MS, HARD_TIMEOUT_MS, MIX_PROVIDER, UPSTREAMS, ENABLE_ECH, PREFERRED_DOMAIN, REGION } from './config.js';
+import { ECS_PROTECT_MS, HARD_TIMEOUT_MS, MIX_PROVIDER, UPSTREAMS, ENABLE_ECH, REGION, REGION_CONFIG } from './config.js';
 import { prepareQuery, filterAnswers } from './edns.js';
 import { serveHomepage, serveHomepageEn } from './homepage.js';
 import { resolveRoute } from './router.js';
@@ -39,8 +39,11 @@ export default {
       }
       const clientIP = request.headers.get('CF-Connecting-IP');
       const queryMeta = parseQueryMeta(body);
-      const regionActive = REGION && request.cf && request.cf.country && REGION.split(/[\s,]+/).includes(request.cf.country);
+      const clientCountry = request.cf && request.cf.country || '';
+      const regionCfg = REGION_CONFIG && REGION_CONFIG[clientCountry];
+      const regionActive = !!regionCfg;
       _regionActive = regionActive;
+      const activePref = regionCfg ? regionCfg.preferred : '';
 
       if (queryMeta && regionActive && shouldRemap(queryMeta.name)) {
         let echRdata = null;
@@ -48,7 +51,7 @@ export default {
           const cfEch = await fetchCFEch(null, null);
           if (cfEch && cfEch.rdata) echRdata = cfEch.rdata;
         }
-        const remapped = await remapResponse(body, queryMeta.name, queryMeta.type, PREFERRED_DOMAIN, echRdata);
+        const remapped = await remapResponse(body, queryMeta.name, queryMeta.type, activePref, echRdata);
         if (remapped !== null) return dnsResponse(remapped);
       }
       if (regionActive && queryMeta && queryMeta.type === 65 && ENABLE_ECH && isMetaDomain(queryMeta.name)) {
@@ -376,8 +379,8 @@ function healthResponse(upstreamNames) {
     hardTimeoutMs: HARD_TIMEOUT_MS,
     ecsProtectMs: ECS_PROTECT_MS,
     region: REGION || null,
+    regionConfig: REGION_CONFIG || null,
     echEnabled: ENABLE_ECH,
-    preferredDomain: PREFERRED_DOMAIN || null,
   }), { headers: JSON_HEADERS });
 }
 
