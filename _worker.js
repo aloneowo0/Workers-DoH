@@ -3,7 +3,7 @@ import { prepareQuery, filterAnswers } from './edns.js';
 import { serveHomepage, serveHomepageEn } from './homepage.js';
 import { resolveRoute } from './router.js';
 import { fetchCFEch, injectECH } from './ech-inject.js';
-import { shouldRemap, remapResponse } from './domain-map.js';
+import { shouldRemap, remapResponse, resolvePreferredIPs } from './domain-map.js';
 import { probeOwner } from './cdn-detect.js';
 
 const DNS_HEADERS = { 'Content-Type': 'application/dns-message' };
@@ -52,6 +52,10 @@ export default {
           const bytes = injected instanceof Response ? await injected.arrayBuffer() : injected;
           if (bytes) return dnsResponse(bytes);
         }
+      }
+      if (queryMeta && isMetaDomain(queryMeta.name) && (queryMeta.type === 1 || queryMeta.type === 28)) {
+        const ips = await resolvePreferredIPs(queryMeta.name, queryMeta.type);
+        if (ips && ips.length > 0) return dnsResponse(buildDNS(queryMeta.id, queryMeta.name, queryMeta.type, ips, 300));
       }
       if (route.provider === MIX_PROVIDER) {
         return await concurrentAll(body, clientIP, queryMeta);
@@ -315,6 +319,45 @@ function dnsResponse(body, upstreamTime) {
     ? { ...DNS_HEADERS, 'X-Upstream-Time': String(upstreamTime) }
     : DNS_HEADERS;
   return new Response(body, { status: 200, headers });
+}
+
+function buildDNS(id, qName, qType, rdataList, ttl) {
+  const labels = qName.replace(/\.+$/, '').split('.');
+  const nameBytes = [];
+  for (const label of labels) {
+    if (label.length > 63) break;
+    nameBytes.push(label.length);
+    for (let i = 0; i < label.length; i++) nameBytes.push(label.charCodeAt(i));
+  }
+  nameBytes.push(0);
+
+  let totalLen = 12 + nameBytes.length + 4;
+  for (const rd of rdataList) totalLen += 12 + rd.length;
+
+  const buf = new ArrayBuffer(totalLen);
+  const bytes = new Uint8Array(buf);
+  const view = new DataView(buf);
+  view.setUint16(0, id);
+  view.setUint16(2, 0x8180);
+  view.setUint16(4, 1);
+  view.setUint16(6, rdataList.length);
+  view.setUint16(8, 0);
+  view.setUint16(10, 0);
+
+  let offset = 12;
+  bytes.set(nameBytes, offset); offset += nameBytes.length;
+  view.setUint16(offset, qType); offset += 2;
+  view.setUint16(offset, 1); offset += 2;
+
+  for (const rd of rdataList) {
+    view.setUint16(offset, 0xC00C); offset += 2;
+    view.setUint16(offset, qType); offset += 2;
+    view.setUint16(offset, 1); offset += 2;
+    view.setUint32(offset, ttl); offset += 4;
+    view.setUint16(offset, rd.length); offset += 2;
+    bytes.set(rd, offset); offset += rd.length;
+  }
+  return buf;
 }
 
 function jsonError(error, status = 400) {
