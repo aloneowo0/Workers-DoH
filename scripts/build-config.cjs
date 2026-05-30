@@ -147,7 +147,6 @@ function generateConfig(env, upstreams) {
     }
     const regions = [...regionSet].sort();
     const region = regions.join(',');
-    const enableEch = regions.length > 0;
 
     // 全局默认值
     const defaultPrefDomain = env.PREFERRED_DOMAIN || '';
@@ -185,9 +184,8 @@ export const BLOCKED_RANGES = ${blockedStr};
 
 export const MIX_PROVIDER = 'mix';
 
-// ── 地区优化解析（REGION 非空时 ECH 自动启用） ──────────
+// ── 地区优化解析 ─────────────────────────────────────
 export const REGION = ${JSON.stringify(region)};
-export const ENABLE_ECH = ${enableEch};
 export const REGION_CONFIG = ${regionConfigStr};
 `;
 }

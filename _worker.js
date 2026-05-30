@@ -1,4 +1,4 @@
-import { ECS_PROTECT_MS, HARD_TIMEOUT_MS, MIX_PROVIDER, UPSTREAMS, ENABLE_ECH, REGION, REGION_CONFIG } from './config.js';
+import { ECS_PROTECT_MS, HARD_TIMEOUT_MS, MIX_PROVIDER, UPSTREAMS, REGION, REGION_CONFIG } from './config.js';
 import { prepareQuery, filterAnswers } from './edns.js';
 import { serveHomepage, serveHomepageEn } from './homepage.js';
 import { resolveRoute } from './router.js';
@@ -47,14 +47,14 @@ export default {
 
       if (queryMeta && regionActive && shouldRemap(queryMeta.name)) {
         let echRdata = null;
-        if (queryMeta.type === 65 && ENABLE_ECH) {
+        if (queryMeta.type === 65) {
           const cfEch = await fetchCFEch(null, null);
           if (cfEch && cfEch.rdata) echRdata = cfEch.rdata;
         }
         const remapped = await remapResponse(body, queryMeta.name, queryMeta.type, activePref, echRdata);
         if (remapped !== null) return dnsResponse(remapped);
       }
-      if (regionActive && queryMeta && queryMeta.type === 65 && ENABLE_ECH && isMetaDomain(queryMeta.name)) {
+      if (regionActive && queryMeta && queryMeta.type === 65 && isMetaDomain(queryMeta.name)) {
         const injected = await injectECH(body, queryMeta.name, 'META', null);
         if (injected) {
           const bytes = injected instanceof Response ? await injected.arrayBuffer() : injected;
@@ -192,7 +192,7 @@ async function singleUpstream(provider, body, clientIP, queryMeta) {
     const responseBody = await response.arrayBuffer();
     const elapsed = Date.now() - started;
     let finalBody = responseBody;
-    if (_regionActive && ENABLE_ECH && queryMeta && queryMeta.type === 65) {
+    if (_regionActive && queryMeta && queryMeta.type === 65) {
       const ownerResult = await probeOwner(queryMeta.name);
       if (ownerResult && ownerResult.owner) {
         const cfEch = await fetchCFEch(null, null);
@@ -301,7 +301,7 @@ function answersPass(responseBody) {
 }
 
 async function postProcessBody(responseBody, queryMeta) {
-  if (!_regionActive || !ENABLE_ECH || !queryMeta || queryMeta.type !== 65) return responseBody;
+  if (!_regionActive || !queryMeta || queryMeta.type !== 65) return responseBody;
   try {
     const ownerResult = await probeOwner(queryMeta.name);
     if (!ownerResult || !ownerResult.owner) return responseBody;
@@ -380,7 +380,7 @@ function healthResponse(upstreamNames) {
     ecsProtectMs: ECS_PROTECT_MS,
     region: REGION || null,
     regionConfig: REGION_CONFIG || null,
-    echEnabled: ENABLE_ECH,
+    echEnabled: REGION_CONFIG ? Object.values(REGION_CONFIG).some(c => c.ech) : false,
   }), { headers: JSON_HEADERS });
 }
 

@@ -28,7 +28,6 @@ export const BLOCKED_RANGES = [
 
 export const MIX_PROVIDER = 'mix';
 
-// ── 地区优化解析（REGION 非空时 ECH 自动启用） ──────────
+// ── 地区优化解析 ─────────────────────────────────────
 export const REGION = "CN";
-export const ENABLE_ECH = true;
 export const REGION_CONFIG = {"CN":{"preferred":"cf.090227.xyz","remap":["twimg.com","twitter.com","x.com","t.co"],"ech":true}};
