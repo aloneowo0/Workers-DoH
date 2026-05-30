@@ -73,7 +73,8 @@ function parseBlockedCidrs(cidrsStr) {
         try {
             if (cidr.includes(':')) {
                 const [ip, pfxStr] = cidr.split('/');
-                const mask = parseInt(pfxStr) || 128;
+                const mask = Number(pfxStr);
+                if (isNaN(mask) || mask < 0 || mask > 128) continue;
                 const addr = parseIPv6(ip);
                 if (!addr) continue;
                 if (addr.every(b => b === 0)) {
@@ -85,7 +86,10 @@ function parseBlockedCidrs(cidrsStr) {
                 const [ip, pfx] = cidr.split('/');
                 const parts = ip.split('.').map(Number);
                 if (parts.length !== 4) continue;
-                entries.push({ family: 4, addr: parts, mask: parseInt(pfx) || 32 });
+                if (parts.some(p => isNaN(p) || p < 0 || p > 255)) continue;
+                const mask = Number(pfx);
+                if (isNaN(mask) || mask < 0 || mask > 32) continue;
+                entries.push({ family: 4, addr: parts, mask });
             }
         } catch (_) { /* skip malformed */ }
     }

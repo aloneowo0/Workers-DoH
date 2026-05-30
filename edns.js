@@ -310,8 +310,10 @@ function parsePublicIPv6(value) {
     const groups = [...left, ...Array(fill).fill('0'), ...right];
     const addr = new Uint8Array(16);
     for (let i = 0; i < 8; i++) {
-        const val = parseInt(groups[i] || '0', 16);
-        if (isNaN(val)) return null;
+        const group = groups[i] || '0';
+        if (!/^[0-9a-fA-F]{1,4}$/.test(group)) return null;
+        const val = parseInt(group, 16);
+        if (isNaN(val) || val > 0xFFFF) return null;
         addr[i * 2] = (val >> 8) & 0xFF;
         addr[i * 2 + 1] = val & 0xFF;
     }

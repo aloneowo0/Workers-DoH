@@ -111,7 +111,7 @@ t=HARD_TIMEOUT_MS
 ```env
 # 预设上游开关
 GOOGLE=true
-CLOUDFLARE_PUBIC=true
+CLOUDFLARE_PUBLIC=true
 QUAD9=true
 ADGUARD=true
 OPENDNS=true

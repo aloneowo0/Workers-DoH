@@ -103,7 +103,7 @@ footer a{color:var(--primary-color)}
 # 全部上游并发，返回最快有效响应</code></pre>
     <h3>单上游查询</h3>
     <pre><code>curl "https://__HOST__/google/dns-query?name=example.com"
-curl "https://__HOST__/cloudflare/dns-query?name=example.com"</code></pre>
+curl "https://__HOST__/cloudflare_Public/dns-query?name=example.com"</code></pre>
     <p style="font-size:.85em;color:#666;margin-top:.8rem">更多上游可通过编辑 <code>.env</code> 启用（设置 <code>=true</code> 后运行 <code>npm run build</code>）</p>
   </section>
 </div>
@@ -234,7 +234,7 @@ footer a{color:var(--primary-color)}
 # Queries all upstreams, returns fastest response</code></pre>
     <h3>Single upstream</h3>
     <pre><code>curl "https://__HOST__/google/dns-query?name=example.com"
-curl "https://__HOST__/cloudflare/dns-query?name=example.com"</code></pre>
+curl "https://__HOST__/cloudflare_Public/dns-query?name=example.com"</code></pre>
     <p style="font-size:.85em;color:#666;margin-top:.8rem">Enable more upstreams by editing <code>.env</code> (set <code>=true</code> then run <code>npm run build</code>)</p>
   </section>
 </div>

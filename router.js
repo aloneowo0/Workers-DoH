@@ -22,7 +22,7 @@ export function resolveRoute(request) {
 
   // /<provider>/dns-query pattern
   const match = pathname.match(/^\/([^/]+)\/dns-query$/);
-  if (!match) return { home: true };
+  if (!match) return { error: 'not_found' };
 
   const provider = match[1];
   if (!VALID_PROVIDERS.has(provider)) return { error: 'unknown_provider' };

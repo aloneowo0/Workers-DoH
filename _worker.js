@@ -268,9 +268,10 @@ function servfail(originalBody, edeCode = 0, edeText = '') {
   const out = new DataView(buf);
   const bytes = new Uint8Array(buf);
 
+  const qdcount = qdBytes.length > 0 ? 1 : 0;
   out.setUint16(0, id);
   out.setUint16(2, 0x8182);
-  out.setUint16(4, 1);
+  out.setUint16(4, qdcount);
   out.setUint16(6, 0);
   out.setUint16(8, 0);
   out.setUint16(10, arcount);
