@@ -1,6 +1,6 @@
 # Workers-DoH
 
-基于 Cloudflare Workers 的轻量级 DNS over HTTPS 代理，支持多上游并发竞速和 EDNS Client-Subnet 注入。
+基于 Cloudflare Workers 的轻量级 DNS over HTTPS 代理，支持 8 上游并发竞速、自动 EDNS Client-Subnet 注入。
 
 ## 快速开始
 
@@ -13,73 +13,96 @@
 
 ## 端点参考
 
-所有端点支持 `POST application/dns-message`（wire format）和 `GET ?name=&type=`。设置 `Accept: application/dns-json` 时走 RFC 8484 JSON 透传。
+所有端点支持 `POST application/dns-message`（wire format）和 `GET ?name=&type=`。设置 `Accept: application/dns-json` 时走 RFC 8484 JSON 透传（直连 Google DNS）。
 
 | 端点 | 说明 |
 |------|------|
-| `/` `/index.html` | 首页（中文） |
+| `/` | 首页（中文） |
 | `/en` | 首页（英文） |
-| `/query-dns` | v1 兼容，等同 `/mix/query-dns` |
-| `/mix/query-dns` | 全部已启用上游并发竞速 |
-| `/<provider>/query-dns` | 单上游查询 |
+| `/health` | JSON 健康检查 |
+| `/dns-query` | 全部已启用上游并发竞速（mix） |
+| `/<provider>/dns-query` | 单上游查询 |
 
-provider 可选值：`google` `cloudflare` `quad9` `adguard` `opendns` `dnspod` `alidns` `360` `nextdns` `yandex`。
+provider 可选值（依 `.env` 启用情况而定）：`google` `cloudflare_Pubic` `quad9` `adguard` `opendns` `dnspod` `alidns` `nextdns` 及自定义 `CUSTOM_*`。
 
-支持 DNS 类型：A（默认）、AAAA、HTTPS、SVCB、TXT、MX、CNAME、NS、SOA、PTR。
+支持 DNS 类型：A（默认）、AAAA、HTTPS(65)、SVCB(64)、TXT、MX、CNAME、NS、SOA、PTR。
 
 ```bash
-# GET 查询
-curl "https://your-worker.dev/mix/query-dns?name=example.com&type=AAAA"
+# GET 查询（mix 模式）
+curl "https://your-worker.dev/dns-query?name=example.com&type=AAAA"
+
+# 单上游查询
+curl "https://your-worker.dev/google/dns-query?name=example.com&type=A"
 
 # POST wire-format
 curl -X POST -H "Content-Type: application/dns-message" \
   --data-binary @query.bin \
-  "https://your-worker.dev/google/query-dns?mode=plus"
+  "https://your-worker.dev/dns-query"
+
+# ?dns=base64 参数
+curl "https://your-worker.dev/dns-query?dns=AAABAAABAAAAAAAAB2V4YW1wbGUDY29tAAABAAE"
+
+# JSON 健康检查
+curl "https://your-worker.dev/health"
 ```
 
 ### 查询参数
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `name` / `dns` | string | 查询域名 |
-| `type` | string | DNS 记录类型（默认 A） |
-| `mode` | string | EDNS 模式：keep / auto（默认）/ plus |
+| `name` | string | 查询域名（与 `type` 搭配） |
+| `type` | string | DNS 记录类型，默认 A |
+| `dns` | string | Base64 编码的 DNS wire format 请求（与 `name` 互斥） |
 
-## EDNS 模式
+## EDNS 处理（全局自动）
 
-通过 `?mode=` 参数选择 EDNS 处理方式：
+所有查询走统一 EDNS 处理流程，无需手动指定模式：
 
-| 模式 | 行为 |
-|------|------|
-| `keep` | 透传原始请求体，不做 EDNS 修改。mix 下等效纯竞速 |
-| `auto` | 请求无 ECS 则注入客户端 /24，已有则跳过（默认） |
-| `plus` | 强制补全：UDP 4096 + DO 位 + ECS + Padding 完整 EDNS 扩展 |
+1. **ECS 注入**：若请求不含 ECS 选项，从 `CF-Connecting-IP` 提取客户端 IP，注入 `/24`（IPv4）或 `/56`（IPv6）子网
+2. **UDP 4096**：确保 OPT 记录的 UDP 负载大小设为 4096
+3. **DO 位**：设置 DNSSEC OK 位，请求 DNSSEC 记录
+4. **黑名单过滤**：应答中的 A/AAAA 记录命中 `BLOCKED_CIDRS` 时整包丢弃
 
-不支持对应能力（ecs / plus）的上游自动降级为 keep 透传。
+ECS 依赖 `CF-Connecting-IP` 请求头，仅在 Cloudflare 代理环境下可用。
 
-## 竞速算法
+## 竞速算法（concurrentAll）
 
-mix 端点的核心逻辑在 `concurrentAll()` 中实现：
+mix 端点的核心逻辑，8 个上游并发竞速：
 
 ```
-ECS 启用时（mode=auto/plus 或请求自带 ECS）：
-
-t=0      并发发送所有上游
-         ├── 保护期 ──────────────────────────┤
-t=10     [ECS 上游] 到 → 有效 → 立即返回
-t=15     [非 ECS 上游] 到 → 丢弃，继续等
-         ...
-t=20     auto 模式保护期结束，后续任意有效响应均可返回
-         plus 模式保护期持续到 HARD_TIMEOUT，全程只接受 ECS 上游
-
-ECS 未启用时（mode=keep 且无 ECS）：
-
-t=0      并发发送所有上游
-t=5      [最快上游] 到 → 有效 → 立即返回（纯竞速）
+t=0          并发发送所有上游
+             ├── 保护窗 (ECS_PROTECT_MS) ─────────┤
+t=~10ms      [ECS 上游] 到 → 有效 → 立即返回
+t=~15ms      [非 ECS 上游] 到 → 有效 → 入暂存区（不返回）
+             ...
+t=ECS_PROTECT_MS
+             保护窗到期
+             ├── 暂存区有非 ECS 响应 → 释放最快的一条
+             └── 暂存区空 → 进入自由竞速
+             ...
+t=自由竞速    任意有效响应（ECS 或非 ECS）立即返回
+             ...
+t=HARD_TIMEOUT_MS
+             硬超时
+             ├── 暂存区有响应 → 释放最快的一条
+             └── 全部无效 → SERVFAIL(code=22)
 ```
 
-- **ECS_PROTECT_MS**（默认 20ms）：auto 模式下的保护窗口。窗口内只接受支持 ECS 的上游的响应。plus 模式忽略此值，保护期覆盖整个超时。
-- **HARD_TIMEOUT_MS**（默认 800ms）：总超时。超时后停止等待，有结果返回最快有效响应，全部无效返回 SERVFAIL。
+- **ECS_PROTECT_MS**（默认 20ms）：保护窗口。窗口内只接受支持 ECS 的上游的响应，非 ECS 响应暂存。窗口到期释放最快暂存，之后所有上游平等竞速。
+- **HARD_TIMEOUT_MS**（默认 800ms）：总超时。超时后不再等待。
+
+## 上游列表
+
+| 上游 | ECS | URL |
+|------|-----|-----|
+| google | ✅ | dns.google/dns-query |
+| cloudflare_Pubic | ❌ | cloudflare-dns.com/dns-query |
+| quad9 | ✅ | dns11.quad9.net/dns-query |
+| adguard | ✅ | dns.adguard-dns.com/dns-query |
+| opendns | ✅ | dns.opendns.com/dns-query |
+| dnspod | ✅ | sm2.doh.pub（国内） |
+| alidns | ✅ | dns.alidns.com（国内） |
+| nextdns | ✅ | dns.nextdns.io |
 
 ## 配置
 
@@ -88,7 +111,7 @@ t=5      [最快上游] 到 → 有效 → 立即返回（纯竞速）
 ```env
 # 预设上游开关
 GOOGLE=true
-CLOUDFLARE=true
+CLOUDFLARE_PUBIC=true
 QUAD9=true
 ADGUARD=true
 OPENDNS=true
@@ -113,35 +136,24 @@ ECS_PREFIX6=56
 BLOCKED_CIDRS=127.0.0.0/8 0.0.0.0/32 ::/128 ::1/128
 ```
 
-`CUSTOM_` 上游默认标记 `ecs: true, plus: true`，名称仅限字母数字和下划线。
-
-## 上游 EDNS 兼容性
-
-各上游的 `ecs`（EDNS Client-Subnet）和 `plus`（UDP 4096 + DO + ECS + Padding）能力由 `scripts/build-config.cjs` 定义：
-
-| 上游 | ECS | Plus |
-|------|-----|------|
-| Google | ✅ | ✅ |
-| Cloudflare | ✅ | ✅ |
-| Quad9 | ✅ | ✅ |
-| AdGuard | ✅ | ✅ |
-| OpenDNS | ✅ | ✅ |
-| DNSPod | ✅ | ✅ |
-| AliDNS | ✅ | ✅ |
-| 360 | ✅ | ✅ |
-| NextDNS | ✅ | ✅ |
-| Yandex | ✖ | ✖ |
+`CUSTOM_` 上游默认标记 `ecs: true`，名称仅限字母数字和下划线。
 
 ## 应答过滤
 
-`BLOCKED_CIDRS` 定义 IPv4/IPv6 黑名单 CIDR。上游返回的 A/AAAA 记录命中任意范围时整包丢弃，返回 SERVFAIL。默认拦截：127.0.0.0/8、0.0.0.0/32、::/128、::1/128。
+`BLOCKED_CIDRS` 定义 IPv4/IPv6 黑名单 CIDR。上游返回的 A/AAAA 记录命中任意范围时整包丢弃，返回 SERVFAIL（含 EDE code）。默认拦截：127.0.0.0/8、0.0.0.0/32、::/128、::1/128。
 
 ## 首页
 
 访问 `/`（中文）或 `/en`（英文）可查看内置管理页，包含：
 - 所有可用端点的路径列表
-- 各上游 ECS/Plus 支持情况表
-- 在线延迟检测工具（选择端点 → 开始测试，显示总延迟和上游处理时间）
+- 各上游 ECS 支持情况表
+- 在线延迟检测工具（选择端点 → 开始测试，显示总延迟和上游处理时间 X-Upstream-Time）
+
+## 响应头
+
+| 头 | 说明 |
+|----|------|
+| `X-Upstream-Time` | 上游处理耗时（ms），仅 DNS 查询响应包含 |
 
 ## 项目结构
 
@@ -153,15 +165,16 @@ Workers-DoH/
 ├── _worker.js                # Worker 入口：路由分发、并发竞速
 ├── router.js                 # URL 路由解析
 ├── edns.js                   # DNS 包解析、EDNS 注入/过滤
-├── homepage.js               # 中英文首页（EDNS 表、延迟检测）
+├── homepage.js               # 中英文首页（ECS 表、延迟检测）
 ├── wrangler.jsonc            # Cloudflare 部署配置
 └── package.json
 ```
 
 ## 注意事项
 
-- **mix 端点保证可用**：单上游可能因网络波动或策略限制（如 quad9 超时、360 拒绝某些域名）返回错误，mix 并发竞速可覆盖这些缺陷。生产使用建议始终走 `/mix/query-dns`。
+- **mix 端点保证可用**：单上游可能因网络波动或策略限制返回错误，mix 并发竞速可覆盖这些缺陷。生产使用建议始终走 `/dns-query`。
 - **CF 并发上限**：Workers 免费计划约 6 个并发 subrequest，标准付费约 8-10 个。mix 模式超配额的上游会内部排队，建议启用不超过 8 个上游。
 - **CF-Connecting-IP**：ECS 注入依赖此请求头，仅在 Cloudflare 代理环境下可用。非 CF 环境需自行传入客户端 IP。
-- **自定义上游默认值**：`CUSTOM_*` 默认 `ecs/plus` 均为 `true`。若上游不支持，需在 `build-config.cjs` 的预设表或构建逻辑中调整。
-- **Yandex** 延迟较高（200-900ms），默认关闭。
+- **cloudflare_Pubic 无 ECS**：该上游不支持 EDNS Client-Subnet，主要用于测试保护窗口的暂存释放机制。
+- **自定义上游默认值**：`CUSTOM_*` 默认 `ecs: true`。若上游不支持，需在 `build-config.cjs` 的预设表中调整。
+- **Yandex / 360**：默认关闭，延迟较高或兼容性不佳，按需启用。
