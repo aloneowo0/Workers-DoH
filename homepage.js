@@ -99,11 +99,11 @@ footer a{color:var(--primary-color)}
     <h2>使用方法</h2>
     <p>支持 POST application/dns-message、GET ?name=&type= 和 Accept: application/dns-json（RFC 8484 透传）。</p>
     <h3>并发模式</h3>
-    <pre><code>curl "https://__HOST__/mix/query-dns?name=example.com&type=A"
+    <pre><code>curl "https://__HOST__/mix/dns-query?name=example.com&type=A"
 # 全部上游并发，返回最快有效响应</code></pre>
     <h3>单上游查询</h3>
-    <pre><code>curl "https://__HOST__/google/query-dns?name=example.com"
-curl "https://__HOST__/cloudflare/query-dns?name=example.com"</code></pre>
+    <pre><code>curl "https://__HOST__/google/dns-query?name=example.com"
+curl "https://__HOST__/cloudflare/dns-query?name=example.com"</code></pre>
     <p style="font-size:.85em;color:#666;margin-top:.8rem">更多上游可通过编辑 <code>.env</code> 启用（设置 <code>=true</code> 后运行 <code>npm run build</code>）</p>
   </section>
 </div>
@@ -125,7 +125,7 @@ async function runLatencyTest(){
      const n=cb.value,row=t.insertRow();
      row.innerHTML='<td><strong>'+n+'</strong></td><td style="color:#999">...</td><td style="color:#999">...</td><td style="color:#999">...</td>';
      const s=performance.now();
-     try{const res=await fetch('/'+n+'/query-dns',{method:'POST',headers:{'Content-Type':'application/dns-message'},body:b64toBytes(FIXED_QUERY)});row.cells[1].textContent=(performance.now()-s).toFixed(0)+'ms';const xt=res.headers.get('X-Upstream-Time');row.cells[2].textContent=xt?xt+'ms':'-';row.cells[3].textContent=res.ok?'\u2705':'\u274C '+res.status}
+     try{const res=await fetch('/'+n+'/dns-query',{method:'POST',headers:{'Content-Type':'application/dns-message'},body:b64toBytes(FIXED_QUERY)});row.cells[1].textContent=(performance.now()-s).toFixed(0)+'ms';const xt=res.headers.get('X-Upstream-Time');row.cells[2].textContent=xt?xt+'ms':'-';row.cells[3].textContent=res.ok?'\u2705':'\u274C '+res.status}
      catch(e){row.cells[1].textContent='-';row.cells[2].textContent='-';row.cells[3].textContent='\u274C'}
    });
    await Promise.all(tasks);
@@ -230,11 +230,11 @@ footer a{color:var(--primary-color)}
     <h2>Usage</h2>
     <p>Supports POST application/dns-message, GET ?name=&type=, and Accept: application/dns-json (RFC 8484 passthrough).</p>
     <h3>Concurrent mode</h3>
-    <pre><code>curl "https://__HOST__/mix/query-dns?name=example.com&type=A"
+    <pre><code>curl "https://__HOST__/mix/dns-query?name=example.com&type=A"
 # Queries all upstreams, returns fastest response</code></pre>
     <h3>Single upstream</h3>
-    <pre><code>curl "https://__HOST__/google/query-dns?name=example.com"
-curl "https://__HOST__/cloudflare/query-dns?name=example.com"</code></pre>
+    <pre><code>curl "https://__HOST__/google/dns-query?name=example.com"
+curl "https://__HOST__/cloudflare/dns-query?name=example.com"</code></pre>
     <p style="font-size:.85em;color:#666;margin-top:.8rem">Enable more upstreams by editing <code>.env</code> (set <code>=true</code> then run <code>npm run build</code>)</p>
   </section>
 </div>
@@ -256,7 +256,7 @@ async function runLatencyTest(){
      const n=cb.value,row=t.insertRow();
      row.innerHTML='<td><strong>'+n+'</strong></td><td style="color:#999">...</td><td style="color:#999">...</td><td style="color:#999">...</td>';
      const s=performance.now();
-     try{const res=await fetch('/'+n+'/query-dns',{method:'POST',headers:{'Content-Type':'application/dns-message'},body:b64toBytes(FIXED_QUERY)});row.cells[1].textContent=(performance.now()-s).toFixed(0)+'ms';const xt=res.headers.get('X-Upstream-Time');row.cells[2].textContent=xt?xt+'ms':'-';row.cells[3].textContent=res.ok?'\u2705':'\u274C '+res.status}
+     try{const res=await fetch('/'+n+'/dns-query',{method:'POST',headers:{'Content-Type':'application/dns-message'},body:b64toBytes(FIXED_QUERY)});row.cells[1].textContent=(performance.now()-s).toFixed(0)+'ms';const xt=res.headers.get('X-Upstream-Time');row.cells[2].textContent=xt?xt+'ms':'-';row.cells[3].textContent=res.ok?'\u2705':'\u274C '+res.status}
      catch(e){row.cells[1].textContent='-';row.cells[2].textContent='-';row.cells[3].textContent='\u274C'}
    });
   await Promise.all(tasks);
@@ -268,7 +268,7 @@ async function runLatencyTest(){
 // ── Shared helpers ─────────────────────────────────────────────────
 
 function buildUpstreamListWithMix(names) {
-  const entries = names.map((n) => '<span class="endpoint">/' + n + '/query-dns</span>').join(' ');
+  const entries = names.map((n) => '<span class="endpoint">/' + n + '/dns-query</span>').join(' ');
   return entries || '<em>none</em>';
 }
 

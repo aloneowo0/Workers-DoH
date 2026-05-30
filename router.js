@@ -15,13 +15,13 @@ export function resolveRoute(request) {
     return { health: true };
   }
 
-  // Legacy v1 compat: bare /query-dns without a provider prefix
-  if (pathname === '/query-dns') {
+  // RFC 8484: bare /dns-query without a provider prefix → mix
+  if (pathname === '/dns-query') {
     return { provider: MIX_PROVIDER, queryString: search };
   }
 
-  // /<provider>/query-dns pattern
-  const match = pathname.match(/^\/([^/]+)\/query-dns$/);
+  // /<provider>/dns-query pattern
+  const match = pathname.match(/^\/([^/]+)\/dns-query$/);
   if (!match) return { home: true };
 
   const provider = match[1];
