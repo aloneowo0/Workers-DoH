@@ -153,28 +153,57 @@ async function concurrentAll(body, clientIP) {
       .then((r) => ({ ecs: cfg.ecs, result: r })),
   }));
 
+  const held = [];  // 暂存区：保护窗内到达的非ECS有效响应
+
   while (pending.length && Date.now() < deadline) {
-    const remaining = Math.min(protectEnd > Date.now() ? protectEnd : deadline, deadline) - Date.now();
-    if (remaining <= 0) break;
+    const inProtect = Date.now() < protectEnd;
+
+    // 保护窗到期先检查暂存：释放最快的那条
+    if (!inProtect && held.length > 0) {
+      held.sort((a, b) => a.result.time - b.result.time);
+      const best = held[0];
+      return dnsResponse(best.result.response, best.result.time);
+    }
+
+    const remaining = (inProtect ? protectEnd : deadline) - Date.now();
+    if (remaining <= 0) {
+      // 剩余时间为0但可能有暂存 → 回到循环顶部释放暂存
+      // 如果保护窗已过且暂存也空了 → 跳出
+      if (!inProtect && held.length === 0) break;
+      continue;
+    }
+
     const settled = await Promise.race([
       ...pending.map((p) => p.promise.then((r) => ({ pending: p, value: r }))),
       sleep(remaining).then(() => null),
     ]);
-    if (!settled) break;
+    if (!settled) {
+      // sleep 赢了 → 检查暂存（回到循环顶部）
+      continue;
+    }
     pending.splice(pending.indexOf(settled.pending), 1);
 
-    if (protectEnd && Date.now() < protectEnd) {
-      // Protection window: only return valid ECS responses
+    if (inProtect) {
+      // 保护窗内：ECS+有效 → 立即返回；非ECS+有效 → 暂存
       if (settled.value.ecs && settled.value.result.valid) {
         return dnsResponse(settled.value.result.response, settled.value.result.time);
+      }
+      if (settled.value.result.valid) {
+        held.push(settled.value);
       }
       continue;
     }
 
-    // After protection: any valid response wins
+    // 保护窗后：任意有效响应直接返回
     if (settled.value.result.valid) {
       return dnsResponse(settled.value.result.response, settled.value.result.time);
     }
+  }
+
+  // 硬超时：最后检查一次暂存
+  if (held.length > 0) {
+    held.sort((a, b) => a.result.time - b.result.time);
+    return dnsResponse(held[0].result.response, held[0].result.time);
   }
 
   return dnsResponse(servfail(body, 22, 'No reachable upstream'), Date.now() - started);
