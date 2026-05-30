@@ -139,9 +139,14 @@ function generateConfig(env, upstreams) {
     const ecsPrefix4 = parseInt(env.ECS_PREFIX4, 10);
     const ecsPrefix6 = parseInt(env.ECS_PREFIX6, 10);
 
-    // 地区优化解析
-    const region = env.REGION || '';
-    const regions = region ? region.split(/[\s,]+/).filter(r => /^[A-Z]{2}$/.test(r)) : [];
+    // 地区优化解析（从 REGION_XX_* 块自动发现地区）
+    const regionSet = new Set();
+    for (const key of Object.keys(env)) {
+        const m = key.match(/^REGION_([A-Z]{2})_/);
+        if (m) regionSet.add(m[1]);
+    }
+    const regions = [...regionSet].sort();
+    const region = regions.join(',');
     const enableEch = regions.length > 0;
 
     // 全局默认值
