@@ -76,6 +76,8 @@ export default {
       const regionActive = !!(regionCfg && regionCfg.preferred);
       const activePref = regionCfg ? regionCfg.preferred : '';
       const echActive = !!(regionCfg && regionCfg.ech);
+      const preferredCft = regionCfg ? (regionCfg.preferredCft || '') : '';
+      const preferredVrc = regionCfg ? (regionCfg.preferredVrc || '') : '';
 
       if (qMeta) {
         const remapDomains = regionCfg ? regionCfg.remap.map(d => d.toLowerCase()) : [];
@@ -139,7 +141,7 @@ export default {
       const queryMeta = qMeta || parseQueryMeta(body);
 
       if (route.provider === MIX_PROVIDER) {
-        return await concurrentAll(body, clientIP, queryMeta, echActive, activePref);
+        return await concurrentAll(body, clientIP, queryMeta, echActive, activePref, preferredCft, preferredVrc);
       }
       return await singleUpstream(route.provider, body, clientIP, queryMeta, echActive);
     } catch (_) {

@@ -158,6 +158,8 @@ function generateConfig(env, upstreams) {
     for (const r of regions) {
         regionConfig[r] = {
             preferred: env['REGION_' + r + '_PREFERRED'] || defaultPrefDomain,
+            preferredCft: env['REGION_' + r + '_PREFERRED_CFT'] || '',
+            preferredVrc: env['REGION_' + r + '_PREFERRED_VRC'] || '',
             remap: env['REGION_' + r + '_REMAP']
                 ? env['REGION_' + r + '_REMAP'].split(/[\s,]+/).filter(d => d.length > 0)
                 : defaultRemap,

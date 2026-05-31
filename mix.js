@@ -7,7 +7,7 @@ import { dnsResponse, buildDNS, servfail } from './dns-lib.js';
 
 const DNS_HEADERS = { 'Content-Type': 'application/dns-message' };
 
-export async function concurrentAll(body, clientIP, queryMeta, regionActive, activePref) {
+export async function concurrentAll(body, clientIP, queryMeta, regionActive, activePref, preferredCft, preferredVrc) {
   const started = Date.now();
   const deadline = started + HARD_TIMEOUT_MS;
   const protectEnd = started + ECS_PROTECT_MS;
@@ -39,7 +39,7 @@ export async function concurrentAll(body, clientIP, queryMeta, regionActive, act
     if (!inProtect && held.length > 0) {
       held.sort((a, b) => a.result.time - b.result.time);
       const best = held[0];
-      const processed = await postProcessBody(best.result.response, queryMeta, regionActive, activePref);
+      const processed = await postProcessBody(best.result.response, queryMeta, regionActive, activePref, preferredCft, preferredVrc);
       abortPending();
       return dnsResponse(processed, best.result.time);
     }
@@ -65,7 +65,7 @@ export async function concurrentAll(body, clientIP, queryMeta, regionActive, act
     if (inProtect) {
       // 保护窗内：ECS+有效 → 立即返回；非ECS+有效 → 暂存
       if (settled.value.ecs && settled.value.result.valid) {
-        const processed = await postProcessBody(settled.value.result.response, queryMeta, regionActive, activePref);
+        const processed = await postProcessBody(settled.value.result.response, queryMeta, regionActive, activePref, preferredCft, preferredVrc);
         abortPending();
         return dnsResponse(processed, settled.value.result.time);
       }
@@ -77,7 +77,7 @@ export async function concurrentAll(body, clientIP, queryMeta, regionActive, act
 
     // 保护窗后：任意有效响应直接返回
     if (settled.value.result.valid) {
-      const processed = await postProcessBody(settled.value.result.response, queryMeta, regionActive, activePref);
+      const processed = await postProcessBody(settled.value.result.response, queryMeta, regionActive, activePref, preferredCft, preferredVrc);
       abortPending();
       return dnsResponse(processed, settled.value.result.time);
     }
@@ -86,7 +86,7 @@ export async function concurrentAll(body, clientIP, queryMeta, regionActive, act
   // 硬超时：最后检查一次暂存
   if (held.length > 0) {
     held.sort((a, b) => a.result.time - b.result.time);
-    const processed = await postProcessBody(held[0].result.response, queryMeta, regionActive, activePref);
+    const processed = await postProcessBody(held[0].result.response, queryMeta, regionActive, activePref, preferredCft, preferredVrc);
     abortPending();
     return dnsResponse(processed, held[0].result.time);
   }
@@ -113,7 +113,7 @@ export function answersPass(responseBody) {
   return result !== false && result?.passed !== false;
 }
 
-export async function postProcessBody(responseBody, queryMeta, regionActive, activePref) {
+export async function postProcessBody(responseBody, queryMeta, regionActive, activePref, preferredCft, preferredVrc) {
   if (!queryMeta) return responseBody;
 
   if (regionActive && queryMeta.type === 65) {
@@ -130,11 +130,17 @@ export async function postProcessBody(responseBody, queryMeta, regionActive, act
     } catch (_) {}
   }
 
-  if (activePref && (queryMeta.type === 1 || queryMeta.type === 28)) {
+  if (queryMeta.type === 1 || queryMeta.type === 28) {
     try {
       const ips = extractIps(responseBody);
-      if (ips.some(function (ip) { return detectOwner(ip) === 'CF'; })) {
-        const preferred = await resolvePreferredIPs(activePref, queryMeta.type);
+      for (const ip of ips) {
+        const owner = detectOwner(ip);
+        const preferredDomain = owner === 'CF' ? activePref
+          : owner === 'CFT' ? preferredCft
+            : owner === 'VRC' ? preferredVrc
+              : '';
+        if (!preferredDomain) continue;
+        const preferred = await resolvePreferredIPs(preferredDomain, queryMeta.type);
         if (preferred && preferred.length > 0) {
           return buildDNS(queryMeta.id, queryMeta.name, queryMeta.type, preferred, 60);
         }
@@ -148,5 +154,4 @@ export async function postProcessBody(responseBody, queryMeta, regionActive, act
 export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-
 
