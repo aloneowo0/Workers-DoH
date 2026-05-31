@@ -43,9 +43,9 @@ export default {
       const clientCountry = request.cf && request.cf.country || '';
       const regionCfg = REGION_CONFIG && REGION_CONFIG[clientCountry];
       const regionActive = !!(regionCfg && regionCfg.preferred);
+      const activePref = regionCfg ? regionCfg.preferred : '';
       _regionActive = !!(regionCfg && regionCfg.ech);
       _activePref = activePref;
-      const activePref = regionCfg ? regionCfg.preferred : '';
 
       const remapDomains = regionCfg ? regionCfg.remap.map(d => d.toLowerCase()) : [];
       if (queryMeta && regionActive && remapDomains.some(d => queryMeta.name === d || queryMeta.name.endsWith('.' + d))) {
