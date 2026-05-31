@@ -480,7 +480,7 @@ export async function resolveDNSWire(domain, type) {
     });
   });
 
-  const timeoutPromise = new Promise(function (resolve) {
+  let timeoutPromise = new Promise(function (resolve) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) { resolve(null); return; }
     setTimeout(function () { resolve(null); }, remaining);
