@@ -1,3 +1,4 @@
+/** ECH injection module — fetches CF ECH, injects into HTTPS RR */
 import { resolveDNSWire } from './resolver.js';
 
 const DNS_HEADER_LEN = 12;
@@ -8,7 +9,7 @@ const SVC_KEY_ECH = 5;
 const CACHE_TTL_MS = 600000;
 const CF_ECH_DOMAIN = 'cloudflare-ech.com';
 
-const META_ECH_B64 = 'AEj+DQBEAQAgACAdd+scUi0IYFsXnUIU7ko2Nd9+F8M26pAGZVpz/KrWPgAEAAEAAWQVZWNoLXB1YmxpYy5hdG1ldGEuY29tAAA=';
+export const META_ECH_B64 = 'AEj+DQBEAQAgACAdd+scUi0IYFsXnUIU7ko2Nd9+F8M26pAGZVpz/KrWPgAEAAEAAWQVZWNoLXB1YmxpYy5hdG1ldGEuY29tAAA=';
 
 const echCache = new Map();
 
@@ -35,8 +36,9 @@ export async function fetchCFEch(_env, _ctx) {
         for (let i = 0; i < httpsRdata.paramBytes.length; i++) {
             const pb = httpsRdata.paramBytes[i];
             if (pb.length < 4) continue;
-            const keyId = new DataView(pb.buffer, pb.byteOffset, 2).getUint16(0);
-            const valLen = new DataView(pb.buffer, pb.byteOffset, 2).getUint16(2);
+            const pbView = new DataView(pb.buffer, pb.byteOffset, pb.byteLength);
+            const keyId = pbView.getUint16(0);
+            const valLen = pbView.getUint16(2);
             if (keyId !== SVC_KEY_ALPN && keyId !== SVC_KEY_ECH) continue;
             const valBytes = pb.subarray(4, 4 + valLen);
             const key = keyId === SVC_KEY_ALPN ? 'alpn' : 'ech';

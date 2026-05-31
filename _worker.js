@@ -1,16 +1,52 @@
+/**
+ * Workers-DoH v2 — Entry point + orchestration
+ *
+ * Routes requests, handles special domains, dispatches to upstreams.
+ * Imports clean modules for ECH, special-domain, multi-upstream racing.
+ */
+
 import { ECS_PROTECT_MS, HARD_TIMEOUT_MS, MIX_PROVIDER, UPSTREAMS, REGION, REGION_CONFIG } from './config.js';
 import { prepareQuery, filterAnswers } from './edns.js';
 import { serveHomepage, serveHomepageEn } from './homepage.js';
-import { resolveRoute } from './router.js';
-import { fetchCFEch, injectECH } from './ech-inject.js';
-import { remapResponse, resolvePreferredIPs } from './domain-map.js';
-import { probeOwner, detectOwner } from './cdn-detect.js';
+import { concurrentAll } from './mix.js';
+import { fetchCFEch, injectECH } from './ech.js';
+import { remapResponse, resolvePreferredIPs, probeOwner, isMetaDomain } from './special-domain.js';
+import { dnsResponse, buildDNS, servfail } from './dns-utils.js';
 
 const DNS_HEADERS = { 'Content-Type': 'application/dns-message' };
 const JSON_HEADERS = { 'Content-Type': 'application/json;charset=utf-8' };
 
-let _regionActive = false;
-let _activePref = '';
+// ── Router (inlined) ───────────────────────────────────────────────
+
+let _validProviders = null;
+function validProviders() {
+  if (!_validProviders) _validProviders = new Set([...Object.keys(UPSTREAMS), MIX_PROVIDER]);
+  return _validProviders;
+}
+
+function resolveRoute(request) {
+  const url = new URL(request.url);
+  const { pathname, search } = url;
+  // Homepage routes
+  if (pathname === '/' || pathname === '/index.html' || pathname === '/en') {
+    return { home: true };
+  }
+  if (pathname === '/health') {
+    return { health: true };
+  }
+  // RFC 8484: bare /dns-query without a provider prefix → mix
+  if (pathname === '/dns-query') {
+    return { provider: MIX_PROVIDER, queryString: search };
+  }
+  // /<provider>/dns-query pattern
+  const match = pathname.match(/^\/([^/]+)\/dns-query$/);
+  if (!match) return { error: 'not_found' };
+  const provider = match[1];
+  if (!validProviders().has(provider)) return { error: 'unknown_provider' };
+  return { provider, queryString: search };
+}
+
+// ── Main handler ───────────────────────────────────────────────────
 
 export default {
   async fetch(request) {
@@ -44,19 +80,20 @@ export default {
       const regionCfg = REGION_CONFIG && REGION_CONFIG[clientCountry];
       const regionActive = !!(regionCfg && regionCfg.preferred);
       const activePref = regionCfg ? regionCfg.preferred : '';
-      _regionActive = !!(regionCfg && regionCfg.ech);
-      _activePref = activePref;
+      const echActive = !!(regionCfg && regionCfg.ech);
 
+      // ── Special domain: remap (Twitter/X etc.) ─────────────────
       const remapDomains = regionCfg ? regionCfg.remap.map(d => d.toLowerCase()) : [];
       if (queryMeta && regionActive && remapDomains.some(d => queryMeta.name === d || queryMeta.name.endsWith('.' + d))) {
         let echRdata = null;
-        if (queryMeta.type === 65 && _regionActive) {
+        if (queryMeta.type === 65 && echActive) {
           const cfEch = await fetchCFEch(null, null);
           if (cfEch && cfEch.rdata) echRdata = cfEch.rdata;
         }
         const remapped = await remapResponse(body, queryMeta.name, queryMeta.type, activePref, echRdata);
         if (remapped !== null) return dnsResponse(remapped);
       }
+      // ── Special domain: Meta ECH injection ─────────────────────
       if (regionActive && queryMeta && queryMeta.type === 65 && isMetaDomain(queryMeta.name)) {
         const injected = await injectECH(body, queryMeta.name, 'META', null);
         if (injected) {
@@ -64,19 +101,24 @@ export default {
           if (bytes) return dnsResponse(bytes);
         }
       }
+      // ── Special domain: Meta A/AAAA resolve ────────────────────
       if (queryMeta && isMetaDomain(queryMeta.name) && (queryMeta.type === 1 || queryMeta.type === 28)) {
         const ips = await resolvePreferredIPs(queryMeta.name, queryMeta.type);
         if (ips && ips.length > 0) return dnsResponse(buildDNS(queryMeta.id, queryMeta.name, queryMeta.type, ips, 300));
       }
+
+      // ── Upstream dispatch ──────────────────────────────────────
       if (route.provider === MIX_PROVIDER) {
-        return await concurrentAll(body, clientIP, queryMeta);
+        return await concurrentAll(body, clientIP, queryMeta, echActive, activePref);
       }
-      return await singleUpstream(route.provider, body, clientIP, queryMeta);
+      return await singleUpstream(route.provider, body, clientIP, queryMeta, echActive);
     } catch (_) {
       return body ? dnsResponse(servfail(body)) : jsonError('internal_error', 500);
     }
   },
 };
+
+// ── DNS query construction ─────────────────────────────────────────
 
 function buildQueryFromURL(url) {
   const dnsParam = url.searchParams.get('dns');
@@ -149,6 +191,8 @@ function parseQueryMeta(body) {
   }
 }
 
+// ── RFC 8484 JSON passthrough ──────────────────────────────────────
+
 async function rfc8484Passthrough(route, request) {
   let target = route.provider === MIX_PROVIDER
     ? Object.values(UPSTREAMS)[0]
@@ -177,7 +221,10 @@ async function rfc8484Passthrough(route, request) {
   }
 }
 
-async function singleUpstream(provider, body, clientIP, queryMeta) {
+// ── Single upstream query ──────────────────────────────────────────
+
+/** @param {string} echActive — whether ECH injection is enabled for this region */
+async function singleUpstream(provider, body, clientIP, queryMeta, echActive) {
   const upstream = UPSTREAMS[provider];
   if (!upstream) return dnsResponse(servfail(body));
   const queryBody = prepareQuery(body, clientIP);
@@ -191,7 +238,7 @@ async function singleUpstream(provider, body, clientIP, queryMeta) {
     const responseBody = await response.arrayBuffer();
     const elapsed = Date.now() - started;
     let finalBody = responseBody;
-    if (_regionActive && queryMeta && queryMeta.type === 65) {
+    if (echActive && queryMeta && queryMeta.type === 65) {
       const ownerResult = await probeOwner(queryMeta.name);
       if (ownerResult && ownerResult.owner) {
         const cfEch = await fetchCFEch(null, null);
@@ -202,246 +249,14 @@ async function singleUpstream(provider, body, clientIP, queryMeta) {
         }
       }
     }
-    if (response.status === 200 && answersPass(finalBody)) return dnsResponse(finalBody, elapsed);
+    const fResult = filterAnswers(finalBody);
+    if (response.status === 200 && fResult !== false && fResult?.passed !== false) return dnsResponse(finalBody, elapsed);
     return dnsResponse(servfail(body, 17, 'Filtered'), elapsed);
   } catch (_) {}
   return dnsResponse(servfail(body));
 }
 
-async function concurrentAll(body, clientIP, queryMeta) {
-  const started = Date.now();
-  const deadline = started + HARD_TIMEOUT_MS;
-  const protectEnd = started + ECS_PROTECT_MS;
-
-  const preparedBody = prepareQuery(body, clientIP);
-
-  const pending = Object.entries(UPSTREAMS).map(([name, cfg]) => {
-    const ctrl = new AbortController();
-    return {
-      ecs: cfg.ecs,
-      ctrl,
-      promise: queryUpstream(cfg.url, preparedBody, started, ctrl.signal)
-        .then((r) => ({ ecs: cfg.ecs, result: r })),
-    };
-  });
-
-  const held = [];
-
-  function abortPending() {
-    for (const p of pending) {
-      try { p.ctrl.abort(); } catch (_) {}
-    }
-  }
-
-  while (pending.length && Date.now() < deadline) {
-    const inProtect = Date.now() < protectEnd;
-
-    // 保护窗到期先检查暂存：释放最快的那条
-    if (!inProtect && held.length > 0) {
-      held.sort((a, b) => a.result.time - b.result.time);
-      const best = held[0];
-      const processed = await postProcessBody(best.result.response, queryMeta);
-      abortPending();
-      return dnsResponse(processed, best.result.time);
-    }
-
-    const remaining = (inProtect ? protectEnd : deadline) - Date.now();
-    if (remaining <= 0) {
-      // 剩余时间为0但可能有暂存 → 回到循环顶部释放暂存
-      // 如果保护窗已过且暂存也空了 → 跳出
-      if (!inProtect && held.length === 0) break;
-      continue;
-    }
-
-    const settled = await Promise.race([
-      ...pending.map((p) => p.promise.then((r) => ({ pending: p, value: r }))),
-      sleep(remaining).then(() => null),
-    ]);
-    if (!settled) {
-      // sleep 赢了 → 检查暂存（回到循环顶部）
-      continue;
-    }
-    pending.splice(pending.indexOf(settled.pending), 1);
-
-    if (inProtect) {
-      // 保护窗内：ECS+有效 → 立即返回；非ECS+有效 → 暂存
-      if (settled.value.ecs && settled.value.result.valid) {
-        const processed = await postProcessBody(settled.value.result.response, queryMeta);
-        abortPending();
-        return dnsResponse(processed, settled.value.result.time);
-      }
-      if (settled.value.result.valid) {
-        held.push(settled.value);
-      }
-      continue;
-    }
-
-    // 保护窗后：任意有效响应直接返回
-    if (settled.value.result.valid) {
-      const processed = await postProcessBody(settled.value.result.response, queryMeta);
-      abortPending();
-      return dnsResponse(processed, settled.value.result.time);
-    }
-  }
-
-  // 硬超时：最后检查一次暂存
-  if (held.length > 0) {
-    held.sort((a, b) => a.result.time - b.result.time);
-    const processed = await postProcessBody(held[0].result.response, queryMeta);
-    abortPending();
-    return dnsResponse(processed, held[0].result.time);
-  }
-
-  return dnsResponse(servfail(body, 22, 'No reachable upstream'), Date.now() - started);
-}
-
-async function queryUpstream(url, body, started, signal) {
-  try {
-    const response = await fetch(url, { method: 'POST', headers: DNS_HEADERS, body, signal });
-    const responseBody = await response.arrayBuffer();
-    return {
-      response: responseBody,
-      time: Date.now() - started,
-      valid: response.status === 200 && answersPass(responseBody),
-    };
-  } catch (_) {
-    return { response: null, time: Date.now() - started, valid: false };
-  }
-}
-
-function answersPass(responseBody) {
-  const result = filterAnswers(responseBody);
-  return result !== false && result?.passed !== false;
-}
-
-async function postProcessBody(responseBody, queryMeta) {
-  if (!queryMeta) return responseBody;
-
-  if (_regionActive && queryMeta.type === 65) {
-    try {
-      const cfEch = await fetchCFEch(null, null);
-      const ownerResult = await probeOwner(queryMeta.name);
-      if (ownerResult && ownerResult.owner) {
-        const injected = await injectECH(responseBody, queryMeta.name, ownerResult.owner, cfEch);
-        if (injected) {
-          const bytes = injected instanceof Response ? await injected.arrayBuffer() : injected;
-          if (bytes) return bytes;
-        }
-      }
-    } catch (_) {}
-  }
-
-  if (_activePref && (queryMeta.type === 1 || queryMeta.type === 28)) {
-    try {
-      const ips = extractIps(responseBody);
-      if (ips.some(function (ip) { return detectOwner(ip) === 'CF'; })) {
-        const preferred = await resolvePreferredIPs(_activePref, queryMeta.type);
-        if (preferred && preferred.length > 0) {
-          return buildDNS(queryMeta.id, queryMeta.name, queryMeta.type, preferred, 60);
-        }
-      }
-    } catch (_) {}
-  }
-
-  return responseBody;
-}
-
-function extractIps(buffer) {
-  const ips = [];
-  try {
-    const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-    if (bytes.length < 12) return ips;
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const ancount = view.getUint16(6);
-    let offset = 12;
-    for (let i = 0; i < view.getUint16(4); i++) {
-      while (offset < bytes.length) {
-        const b = bytes[offset];
-        if (b === 0) { offset++; break; }
-        if ((b & 0xC0) === 0xC0) { offset += 2; break; }
-        offset += b + 1;
-      }
-      offset += 4;
-    }
-    for (let i = 0; i < ancount; i++) {
-      if (offset + 12 > bytes.length) break;
-      let b = bytes[offset];
-      if ((b & 0xC0) === 0xC0) { offset += 2; }
-      else {
-        while (b !== 0) {
-          if ((b & 0xC0) === 0xC0) { offset += 1; break; }
-          offset += b + 1;
-          b = bytes[offset];
-        }
-        offset++;
-      }
-      const type = view.getUint16(offset); offset += 8;
-      const rdlen = view.getUint16(offset); offset += 2;
-      if (type === 1 && rdlen === 4) {
-        ips.push(bytes[offset] + '.' + bytes[offset+1] + '.' + bytes[offset+2] + '.' + bytes[offset+3]);
-      } else if (type === 28 && rdlen === 16) {
-        const p = [];
-        for (let j = 0; j < 16; j += 2) p.push(((bytes[offset+j] << 8) | bytes[offset+j+1]).toString(16));
-        ips.push(p.join(':'));
-      }
-      offset += rdlen;
-    }
-  } catch (_) {}
-  return ips;
-}
-
-function isMetaDomain(name) {
-  const domains = ['facebook.com','fbcdn.net','instagram.com','cdninstagram.com','messenger.com','whatsapp.com','whatsapp.net','threads.net','meta.com','oculus.com','fbsbx.com','thefacebook.com','connect.facebook.net'];
-  try {
-    return domains.some(function (d) { return name === d || name.endsWith('.' + d); });
-  } catch (_) { return false; }
-}
-
-function dnsResponse(body, upstreamTime) {
-  const headers = upstreamTime != null
-    ? { ...DNS_HEADERS, 'X-Upstream-Time': String(upstreamTime) }
-    : DNS_HEADERS;
-  return new Response(body, { status: 200, headers });
-}
-
-function buildDNS(id, qName, qType, rdataList, ttl) {
-  const labels = qName.replace(/\.+$/, '').split('.');
-  const nameBytes = [];
-  for (const label of labels) {
-    if (label.length > 63) break;
-    nameBytes.push(label.length);
-    for (let i = 0; i < label.length; i++) nameBytes.push(label.charCodeAt(i));
-  }
-  nameBytes.push(0);
-
-  let totalLen = 12 + nameBytes.length + 4;
-  for (const rd of rdataList) totalLen += 12 + rd.length;
-
-  const buf = new ArrayBuffer(totalLen);
-  const bytes = new Uint8Array(buf);
-  const view = new DataView(buf);
-  view.setUint16(0, id);
-  view.setUint16(2, 0x8180);
-  view.setUint16(4, 1);
-  view.setUint16(6, rdataList.length);
-  view.setUint16(8, 0);
-  view.setUint16(10, 0);
-
-  let offset = 12;
-  bytes.set(nameBytes, offset); offset += nameBytes.length;
-  view.setUint16(offset, qType); offset += 2;
-  view.setUint16(offset, 1); offset += 2;
-
-  for (const rd of rdataList) {
-    view.setUint16(offset, 0xC00C); offset += 2;
-    view.setUint16(offset, qType); offset += 2;
-    view.setUint16(offset, 1); offset += 2;
-    view.setUint32(offset, ttl); offset += 4;
-    view.setUint16(offset, rd.length); offset += 2;
-    bytes.set(rd, offset); offset += rd.length;
-  }
-  return buf;
-}
+// ── Response helpers ───────────────────────────────────────────────
 
 function jsonError(error, status = 400) {
   return new Response(JSON.stringify({ error }), { status, headers: JSON_HEADERS });
@@ -457,62 +272,4 @@ function healthResponse(upstreamNames) {
     regionConfig: REGION_CONFIG || null,
     echEnabled: REGION_CONFIG ? Object.values(REGION_CONFIG).some(c => c.ech) : false,
   }), { headers: JSON_HEADERS });
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function servfail(originalBody, edeCode = 0, edeText = '') {
-  const id = originalBody && originalBody.byteLength >= 2 ? new DataView(originalBody).getUint16(0) : 0;
-  const textBytes = new TextEncoder().encode(edeText);
-  const edeOptionLen = edeCode ? (6 + textBytes.length) : 0;
-
-  const headerLen = 12;
-  const qdEnd = skipQuestion(originalBody);
-  const qdBytes = qdEnd > headerLen ? new Uint8Array(originalBody.slice(headerLen, qdEnd)) : new Uint8Array(0);
-
-  const arcount = edeCode ? 1 : 0;
-  const optLen = edeCode ? (11 + edeOptionLen) : 0;
-  const total = headerLen + qdBytes.length + optLen;
-  const buf = new ArrayBuffer(total);
-  const out = new DataView(buf);
-  const bytes = new Uint8Array(buf);
-
-  const qdcount = qdBytes.length > 0 ? 1 : 0;
-  out.setUint16(0, id);
-  out.setUint16(2, 0x8182);
-  out.setUint16(4, qdcount);
-  out.setUint16(6, 0);
-  out.setUint16(8, 0);
-  out.setUint16(10, arcount);
-  bytes.set(qdBytes, headerLen);
-
-  if (edeCode) {
-    const off = headerLen + qdBytes.length;
-    bytes[off] = 0;
-    out.setUint16(off + 1, 41);
-    out.setUint16(off + 3, 4096);
-    out.setUint32(off + 5, 0);
-    out.setUint16(off + 9, edeOptionLen);
-    out.setUint16(off + 11, 15);
-    out.setUint16(off + 13, 2 + textBytes.length);
-    out.setUint16(off + 15, edeCode);
-    if (textBytes.length) bytes.set(textBytes, off + 17);
-  }
-
-  return buf;
-}
-
-function skipQuestion(body) {
-  if (!body || body.byteLength < 12) return 12;
-  let off = 12;
-  const bytes = new Uint8Array(body);
-  while (off < bytes.length) {
-    const len = bytes[off];
-    if (len === 0) return off + 1 + 4;
-    if (len & 0xC0) return off + 2 + 4;
-    off += 1 + len;
-  }
-  return 12;
 }

@@ -1,10 +1,12 @@
-/**
- * CDN owner detection module for Workers-DoH v2.
- * Detects whether an IP or domain belongs to Cloudflare or Meta CDN
- * using compiled CIDR range matching.
- */
+/** Special domain handling — remap, CDN owner detection, CIDR matching */
 
-import { resolveDNSWire, extractIPStrings } from './resolver.js';
+import { resolveDNSWire, extractIPBytes, extractIPStrings } from './resolver.js';
+
+const TYPE_A = 1;
+const TYPE_AAAA = 28;
+const TYPE_HTTPS = 65;
+const CACHE_TTL = 300_000;
+const PROBE_CACHE_TTL = 3600 * 1000;
 
 const RAW_META_CIDRS = [
     '31.13.24.0/21', '31.13.64.0/18', '45.64.40.0/22',
@@ -64,12 +66,67 @@ const RAW_CF_CIDRS = [
     '2c0f:f248::/32',
 ];
 
-const CACHE_TTL = 3600 * 1000;
-
+const ipCache = new Map();
 const probeCache = new Map();
 
 const COMPILED_META = compileCidrs(RAW_META_CIDRS);
 const COMPILED_CF = compileCidrs(RAW_CF_CIDRS);
+
+export async function remapResponse(originalBody, queryName, queryType, preferredDomain, echRdata) {
+    try {
+        const id = parseQueryId(originalBody);
+
+        if (queryType === TYPE_AAAA) {
+            return createDNSResponse(id, queryName, TYPE_AAAA, [], 3600);
+        }
+
+        if (queryType === TYPE_HTTPS) {
+            if (echRdata && echRdata.length > 0) {
+                return createDNSResponse(id, queryName, TYPE_HTTPS, [echRdata], 3600);
+            }
+            return createDNSResponse(id, queryName, TYPE_HTTPS, [], 60);
+        }
+
+        if (queryType === TYPE_A) {
+            if (!preferredDomain) return null;
+            const ips = await resolvePreferredIPs(preferredDomain, TYPE_A);
+            if (!ips || ips.length === 0) return null;
+            return createDNSResponse(id, queryName, TYPE_A, ips, 60);
+        }
+
+        return null;
+    } catch (_) {
+        return null;
+    }
+}
+
+/**
+ * Resolve a domain's A (type=1) or AAAA (type=28) records via Google DoH JSON API.
+ * Returns an array of IP bytes (Uint8Array[]) or null on failure.
+ * Results are cached for 300 seconds.
+ */
+export async function resolvePreferredIPs(domain, type) {
+    try {
+        const cacheKey = `${domain}|${type}`;
+        const cached = ipCache.get(cacheKey);
+        if (cached && Date.now() < cached.expires) {
+            return cached.ips;
+        }
+
+        const buf = await resolveDNSWire(domain, type);
+        if (!buf) return null;
+
+        const ips = extractIPBytes(buf, type);
+        if (ips.length > 0) {
+            ipCache.set(cacheKey, { ips, expires: Date.now() + CACHE_TTL });
+            return ips;
+        }
+
+        return null;
+    } catch (_) {
+        return null;
+    }
+}
 
 /**
  * Synchronously detect the CDN owner of an IP address.
@@ -117,11 +174,62 @@ export async function probeOwner(domain) {
             if (isIpInCompiled(ip, COMPILED_META)) { owner = 'META'; break; }
         }
 
-        probeCache.set(key, { owner, ips, expire: Date.now() + CACHE_TTL });
+        probeCache.set(key, { owner, ips, expire: Date.now() + PROBE_CACHE_TTL });
         return { owner, ips };
     } catch (_) {
         return { owner: null, ips: [] };
     }
+}
+
+export function extractIps(buffer) {
+  const ips = [];
+  try {
+    const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    if (bytes.length < 12) return ips;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const ancount = view.getUint16(6);
+    let offset = 12;
+    for (let i = 0; i < view.getUint16(4); i++) {
+      while (offset < bytes.length) {
+        const b = bytes[offset];
+        if (b === 0) { offset++; break; }
+        if ((b & 0xC0) === 0xC0) { offset += 2; break; }
+        offset += b + 1;
+      }
+      offset += 4;
+    }
+    for (let i = 0; i < ancount; i++) {
+      if (offset + 12 > bytes.length) break;
+      let b = bytes[offset];
+      if ((b & 0xC0) === 0xC0) { offset += 2; }
+      else {
+        while (b !== 0) {
+          if ((b & 0xC0) === 0xC0) { offset += 1; break; }
+          offset += b + 1;
+          b = bytes[offset];
+        }
+        offset++;
+      }
+      const type = view.getUint16(offset); offset += 8;
+      const rdlen = view.getUint16(offset); offset += 2;
+      if (type === 1 && rdlen === 4) {
+        ips.push(bytes[offset] + '.' + bytes[offset+1] + '.' + bytes[offset+2] + '.' + bytes[offset+3]);
+      } else if (type === 28 && rdlen === 16) {
+        const p = [];
+        for (let j = 0; j < 16; j += 2) p.push(((bytes[offset+j] << 8) | bytes[offset+j+1]).toString(16));
+        ips.push(p.join(':'));
+      }
+      offset += rdlen;
+    }
+  } catch (_) {}
+  return ips;
+}
+
+export function isMetaDomain(name) {
+  const domains = ['facebook.com','fbcdn.net','instagram.com','cdninstagram.com','messenger.com','whatsapp.com','whatsapp.net','threads.net','meta.com','oculus.com','fbsbx.com','thefacebook.com','connect.facebook.net'];
+  try {
+    return domains.some(function (d) { return name === d || name.endsWith('.' + d); });
+  } catch (_) { return false; }
 }
 
 async function resolveA(domain) {
@@ -132,6 +240,82 @@ async function resolveA(domain) {
     } catch (_) {
         return [];
     }
+}
+
+function createDNSResponse(id, qName, qType, rdataList, ttl) {
+    const encodedName = encodeDnsName(qName);
+
+    let totalLen = 12 + encodedName.length + 4;
+    for (let i = 0; i < rdataList.length; i++) {
+        totalLen += 12 + rdataList[i].length;
+    }
+
+    const buf = new Uint8Array(totalLen);
+    const v = new DataView(buf.buffer);
+
+    v.setUint16(0, id);                        // Transaction ID
+    v.setUint16(2, 0x8180);                    // Flags: QR=1, RD=1, RA=1
+    v.setUint16(4, 1);                         // QDCOUNT
+    v.setUint16(6, rdataList.length);          // ANCOUNT
+    v.setUint16(8, 0);                         // NSCOUNT
+    v.setUint16(10, 0);                        // ARCOUNT
+
+    let offset = 12;
+    buf.set(encodedName, offset);
+    offset += encodedName.length;
+    v.setUint16(offset, qType);
+    offset += 2;
+    v.setUint16(offset, 1);                    // Class IN
+    offset += 2;
+
+    for (let i = 0; i < rdataList.length; i++) {
+        const r = rdataList[i];
+        v.setUint16(offset, 0xC00C);           // Name pointer to question (offset 12)
+        offset += 2;
+        v.setUint16(offset, qType);
+        offset += 2;
+        v.setUint16(offset, 1);                // Class IN
+        offset += 2;
+        v.setUint32(offset, ttl || 3600);
+        offset += 4;
+        v.setUint16(offset, r.length);         // RDLENGTH
+        offset += 2;
+        buf.set(r, offset);
+        offset += r.length;
+    }
+
+    return buf.buffer;
+}
+
+function encodeDnsName(domain) {
+    const parts = domain.split('.');
+    const buf = new Uint8Array(domain.length + 2);
+    let offset = 0;
+    for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        buf[offset++] = part.length;
+        for (let j = 0; j < part.length; j++) {
+            buf[offset++] = part.charCodeAt(j);
+        }
+    }
+    buf[offset++] = 0;
+    return buf.slice(0, offset);
+}
+
+function parseQueryId(body) {
+    try {
+        const bytes = toBytes(body);
+        if (bytes.length < 2) return 0;
+        return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint16(0);
+    } catch (_) {
+        return 0;
+    }
+}
+
+function toBytes(body) {
+    if (body instanceof ArrayBuffer) return new Uint8Array(body);
+    if (ArrayBuffer.isView(body)) return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+    throw new Error('body must be ArrayBuffer or ArrayBufferView');
 }
 
 function compileCidrs(cidrList) {

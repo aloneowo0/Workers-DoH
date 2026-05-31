@@ -85,11 +85,17 @@ export async function resolveDNSWire(domain, type) {
       abortAll();
       return winner;
     }
-    racers.splice(racers.indexOf(timeoutPromise), 1);
-    if (racers.length === 0 || Date.now() >= deadline) break;
+    // Either an upstream or timeout resolved null
+    if (Date.now() >= deadline) break;
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
-    await new Promise(r => setTimeout(r, Math.min(remaining, 50)));
+    // Replace timeout with a new shorter one for retry
+    const newTimeout = new Promise(function (resolve) {
+      setTimeout(function () { resolve(null); }, Math.min(remaining, 50));
+    });
+    const idx = racers.indexOf(timeoutPromise);
+    if (idx >= 0) racers[idx] = newTimeout;
+    timeoutPromise = newTimeout;
   }
 
   abortAll();
