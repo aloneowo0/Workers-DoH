@@ -48,9 +48,9 @@ export default {
       _activePref = activePref;
 
       const remapDomains = regionCfg ? regionCfg.remap.map(d => d.toLowerCase()) : [];
-      if (queryMeta && regionActive && remapDomains.some(d => queryMeta.name === d)) {
+      if (queryMeta && regionActive && remapDomains.some(d => queryMeta.name === d || queryMeta.name.endsWith('.' + d))) {
         let echRdata = null;
-        if (queryMeta.type === 65) {
+        if (queryMeta.type === 65 && _regionActive) {
           const cfEch = await fetchCFEch(null, null);
           if (cfEch && cfEch.rdata) echRdata = cfEch.rdata;
         }
@@ -319,9 +319,9 @@ function answersPass(responseBody) {
 }
 
 async function postProcessBody(responseBody, queryMeta) {
-  if (!_regionActive || !queryMeta) return responseBody;
+  if (!queryMeta) return responseBody;
 
-  if (queryMeta.type === 65) {
+  if (_regionActive && queryMeta.type === 65) {
     try {
       const cfEch = await fetchCFEch(null, null);
       const ownerResult = await probeOwner(queryMeta.name);
@@ -333,10 +333,9 @@ async function postProcessBody(responseBody, queryMeta) {
         }
       }
     } catch (_) {}
-    return responseBody;
   }
 
-  if ((queryMeta.type === 1 || queryMeta.type === 28) && _activePref) {
+  if (_activePref && (queryMeta.type === 1 || queryMeta.type === 28)) {
     try {
       const ips = extractIps(responseBody);
       if (ips.some(function (ip) { return detectOwner(ip) === 'CF'; })) {

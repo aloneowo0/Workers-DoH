@@ -23,12 +23,6 @@ export async function remapResponse(originalBody, queryName, queryType, preferre
         const id = parseQueryId(originalBody);
 
         if (queryType === TYPE_AAAA) {
-            if (preferredDomain) {
-                const ips = await resolvePreferredIPs(preferredDomain, TYPE_AAAA);
-                if (ips && ips.length > 0) {
-                    return createDNSResponse(id, queryName, TYPE_AAAA, ips, 60);
-                }
-            }
             return createDNSResponse(id, queryName, TYPE_AAAA, [], 3600);
         }
 
