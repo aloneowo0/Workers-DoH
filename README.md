@@ -1,190 +1,174 @@
-# Workers-DoH v2 — DNS-over-HTTPS Proxy on Cloudflare Workers
+# Workers-DoH v2 — Cloudflare Workers DNS-over-HTTPS 代理
 
-A Cloudflare Worker that proxies DNS-over-HTTPS requests across 8 upstream providers with multi-upstream racing, EDNS client-subnet injection, ECH (Encrypted Client Hello) injection for Cloudflare and Meta CDN domains, CDN owner detection via CIDR matching, Twitter/X domain remapping, and IP blocklist filtering.
+基于 Cloudflare Workers 的 DoH 代理，支持 8 个上游并发竞速、EDNS 客户端子网注入、ECH 加密 ClientHello 注入（Cloudflare / Meta CDN）、CDN 归属检测、Twitter/X 域名重映射、IP 黑名单过滤。
 
-## Architecture
+## 架构
 
 ```
-                          ┌──────────────────────┐
-                          │     _worker.js        │
-                          │  Entry / Router /     │
-                          │  Orchestration        │
-                          └──────┬───────┬────────┘
-                                 │       │
-              ┌──────────────────┘       └──────────────────┐
-              ▼                                               ▼
-   ┌──────────────────────┐                     ┌──────────────────────────┐
-   │       mix.js         │                     │    special-domain.js     │
-   │  Multi-upstream race │                     │  Domain remap / CDN      │
-   │  ECS protect window  │                     │  owner detection / CIDR  │
-   └────────┬─────────────┘                     └──────────┬───────────────┘
-            │                                               │
-            ▼                                               ▼
-   ┌──────────────────────┐                     ┌──────────────────────────┐
-   │       edns.js        │                     │       resolver.js        │
-   │  DNS wire parse /    │                     │  Internal DNS resolver   │
-   │  ECS inject /        │                     │  (wire query builder,    │
-   │  IP filter           │                     │   multi-upstream race)   │
-   └──────────────────────┘                     └──────────────────────────┘
-                                                         │
-                                                         ▼
-                                              ┌──────────────────────┐
-                                              │       ech.js         │
-                                              │  ECH config fetch /  │
-                                              │  HTTPS RR injection  │
-                                              └──────────────────────┘
-                                                         │
-                                              ┌──────────────────────┐
-                                              │    homepage.js       │
-                                              │  CN/EN homepage      │
-                                              │  latency test tool   │
-                                              └──────────────────────┘
-                                                         │
-                                              ┌──────────────────────┐
-                                              │     config.js        │
-                                              │  Run-time config     │
-                                              │  (auto-generated)    │
-                                              └──────────────────────┘
+                         ┌──────────────────┐
+                         │    _worker.js     │
+                         │  入口 / 路由 / 调度 │
+                         └──┬───┬───┬───┬──┘
+                            │   │   │   │
+          ┌─────────────────┘   │   │   └──────────────┐
+          ▼                     │   │                  ▼
+   ┌────────────┐              │   │           ┌──────────────┐
+   │   mix.js   │              │   │           │  homepage.js │
+   │ 多上游竞速  │              │   │           │  中英文首页   │
+   │ ECS 保护窗 │              │   │           └──────────────┘
+   └─────┬──────┘              │   │
+         │                     │   │
+         ▼                     │   │
+   ┌────────────┐              │   │
+   │  edns.js   │              │   │
+   │ ECS 注入   │              │   │
+   │ IP 黑名单  │              │   │
+   └─────┬──────┘              │   │
+         │                     │   │
+         ▼                     ▼   ▼
+   ┌──────────────────────────────────────┐
+   │              dns-lib.js              │
+   │  DNS 线格式 / 响应构建 / 内部解析      │
+   └─────┬──────────────────┬─────────────┘
+         │                  │
+         ▼                  ▼
+   ┌──────────┐     ┌────────────────┐
+   │  ech.js  │     │special-domain.js│
+   │ECH 获取  │     │ 域名重映射      │
+   │ECH 注入  │     │ CDN 归属检测    │
+   └──────────┘     └────────────────┘
+         │                  │
+         └────┬─────────────┘
+              ▼
+       ┌──────────┐
+       │config.js │
+       │ 运行配置  │
+       └──────────┘
 ```
 
-## Module Reference
+## 模块说明
 
-| Module | File | Responsibility | Key Exports |
-|--------|------|----------------|-------------|
-| Entry | `_worker.js` | Request routing, orchestration, special domain pre-processing, single-upstream fallback, DNS wire format construction, SERVFAIL generation | `default.fetch` (handler), `resolveRoute()`, `buildDNS()`, `servfail()` |
-| Mix | `mix.js` | Multi-upstream concurrent racing with ECS protect window, post-processing (ECH injection, preferred IP remap) | `concurrentAll()`, `queryUpstream()`, `postProcessBody()`, `answersPass()` |
-| EDNS | `edns.js` | DNS packet parsing, EDNS/ECS auto-injection, UDP 4096 / DO bit enforcement, A/AAAA IP blocklist filtering | `prepareQuery()`, `filterAnswers()` |
-| ECH | `ech.js` | Fetch CF ECH config via internal DNS, parse HTTPS/SVCB RRs, inject `ech=` and `alpn=` SvcParams into responses | `fetchCFEch()`, `injectECH()`, `META_ECH_B64` |
-| Special Domain | `special-domain.js` | Twitter/X domain IP remapping, CDN owner detection (Cloudflare/Meta via CIDR), Meta domain recognition, preferred IP resolution | `remapResponse()`, `resolvePreferredIPs()`, `detectOwner()`, `probeOwner()`, `isMetaDomain()`, `extractIps()` |
-| Resolver | `resolver.js` | Internal DNS wire-format query builder, multi-upstream racing for internal lookups (no ECS/EDNS processing), IP byte/string extraction | `resolveDNSWire()`, `extractIPBytes()`, `extractIPStrings()` |
-| Homepage | `homepage.js` | Bilingual (CN/EN) management UI with upstream list, EDNS capability table, browser-side latency test tool | `serveHomepage()`, `serveHomepageEn()` |
-| Config | `config.js` | Run-time configuration: upstream URLs/ECS flags, timeouts, ECS prefixes, blocked CIDR ranges, region optimizations | `UPSTREAMS`, `ECS_PROTECT_MS`, `HARD_TIMEOUT_MS`, `ECS_PREFIX4`, `ECS_PREFIX6`, `BLOCKED_RANGES`, `MIX_PROVIDER`, `REGION`, `REGION_CONFIG` |
+| 模块 | 文件 | 职责 | 导出 |
+|------|------|------|------|
+| 入口 | `_worker.js` | 路由分发 + 总调度：特殊域名预处理、上游分发、JSON 透传 | 默认导出 `fetch` 处理器 |
+| 竞速 | `mix.js` | 多上游并发竞速：ECS 保护窗策略 + 赛后 ECH/CF-IP 后处理 | `concurrentAll()` |
+| EDNS | `edns.js` | DNS 包解析 + ECS 客户端子网注入 + UDP 4096/DO 位 + IP 黑名单过滤 | `prepareQuery()`, `filterAnswers()` |
+| ECH | `ech.js` | CF ECH 配置获取（内部 DNS）+ HTTPS/SVCB RR 解析注入 `ech=`/`alpn=` | `fetchCFEch()`, `injectECH()`, `META_ECH_B64` |
+| 特殊域名 | `special-domain.js` | Twitter/X 域名 IP 重映射 + CDN 归属检测（CF/Meta CIDR）+ Meta 域名匹配 | `remapResponse()`, `resolvePreferredIPs()`, `detectOwner()`, `probeOwner()`, `isMetaDomain()`, `extractIps()` |
+| DNS 库 | `dns-lib.js` | DNS 线格式编解码、响应构建、SERVFAIL、内部 DNS 解析（竞速 + Google 直连兜底） | `buildDNS()`, `servfail()`, `dnsResponse()`, `resolveDNSWire()`, `resolveDNSWireGoogle()` 等 |
+| 首页 | `homepage.js` | 中英文管理首页 + 延迟检测工具 | `serveHomepage()`, `serveHomepageEn()` |
+| 配置 | `config.js` | 运行时配置：上游 URL/ECS 标记、超时、ECS 前缀、IP 黑名单、区域优化 | `UPSTREAMS`, `ECS_PROTECT_MS`, `HARD_TIMEOUT_MS`, `REGION_CONFIG` 等 |
 
-## Endpoints
+## 端点
 
-All endpoints support `POST application/dns-message` (wire format) and `GET ?name=&type=`. Sending `Accept: application/dns-json` triggers RFC 8484 JSON passthrough (proxied to a single upstream).
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/` | GET | 中文首页 |
+| `/en` | GET | 英文首页 |
+| `/health` | GET | JSON 健康检查 |
+| `/dns-query` | GET/POST | 多上游并发竞速（mix） |
+| `/:provider/dns-query` | GET/POST | 单上游查询 |
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Homepage (Chinese) |
-| `/en` | GET | Homepage (English) |
-| `/health` | GET | JSON health check with upstream list and config state |
-| `/dns-query` | GET/POST | Multi-upstream concurrent racing (mix) |
-| `/:provider/dns-query` | GET/POST | Single upstream query |
+可用上游：`google`、`cloudflare_Public`、`quad9`、`adguard`、`opendns`、`dnspod`、`alidns`、`nextdns`，以及自定义 `CUSTOM_*`。
 
-Provider values (depending on `.env` toggles): `google`, `cloudflare_Public`, `quad9`, `adguard`, `opendns`, `dnspod`, `alidns`, `nextdns`, and any `CUSTOM_*` entries.
+支持 DNS 类型：A（默认）、AAAA、HTTPS(65)、SVCB(64)、TXT、MX、CNAME、NS、SOA、PTR。
 
-Supported DNS types: A (default), AAAA, HTTPS(65), SVCB(64), TXT, MX, CNAME, NS, SOA, PTR.
+请求格式支持三种：
+- `POST application/dns-message` — 二进制线格式
+- `GET ?name=xxx&type=A` — URL 参数
+- `GET ?dns=<base64>` — Firefox/Chrome DoH 格式
+- `Accept: application/dns-json` — RFC 8484 JSON 透传
 
 ```bash
-# GET query (mix mode)
-curl "https://your-worker.dev/dns-query?name=example.com&type=AAAA"
+# GET 查询（mix 模式）
+curl "https://h-demo.mk01.top/dns-query?name=example.com&type=AAAA"
 
-# Single upstream
-curl "https://your-worker.dev/google/dns-query?name=example.com&type=A"
+# 单上游
+curl "https://h-demo.mk01.top/google/dns-query?name=example.com&type=A"
 
-# POST wire format
+# POST 线格式
 curl -X POST -H "Content-Type: application/dns-message" \
-  --data-binary @query.bin \
-  "https://your-worker.dev/dns-query"
+  --data-binary @query.bin "https://h-demo.mk01.top/dns-query"
 
-# Base64 dns parameter
-curl "https://your-worker.dev/dns-query?dns=AAABAAABAAAAAAAAB2V4YW1wbGUDY29tAAABAAE"
+# Firefox DoH 格式
+curl "https://h-demo.mk01.top/dns-query?dns=AAABAAABAAAAAAAAB2V4YW1wbGUDY29tAAABAAE"
 
-# Health check
-curl "https://your-worker.dev/health"
+# 健康检查
+curl "https://h-demo.mk01.top/health"
 ```
 
-### Query Parameters
+## 功能
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | string | Domain name to query (paired with `type`) |
-| `type` | string | DNS record type, defaults to A |
-| `dns` | string | Base64-encoded DNS wire format request (mutually exclusive with `name`) |
+### 多上游竞速（mix.js）
 
-## Features
-
-### Multi-upstream Racing (mix.js)
-
-The `concurrentAll()` function in `mix.js` is the core racing engine. It sends the query to all enabled upstreams simultaneously and implements a two-phase strategy:
+`concurrentAll()` 将查询同时发给所有启用的上游，分两个阶段：
 
 ```
-t=0                        Fire all upstreams concurrently
-       ┌──────────────── ECS Protect Window (ECS_PROTECT_MS) ────────┤
-t~10ms [ECS upstream] arrives, valid → return immediately
-t~15ms [Non-ECS upstream] arrives, valid → hold in staging
-       ...
-t=ECS_PROTECT_MS
-       Protect window closes
-       Staging has responses → release fastest
-       Staging empty → free-for-all race
-       ...
-t=free race               Any valid response (ECS or not) returns immediately
-       ...
-t=HARD_TIMEOUT_MS
-       Hard timeout
-       Staging has responses → release fastest
-       All failed → SERVFAIL(code=22, "No reachable upstream")
+t=0                    全部上游并发发出
+     ┌────────── ECS 保护窗（ECS_PROTECT_MS=20ms）──────────┐
+t≈10ms  [ECS 上游] 到达且有效 → 立即返回
+t≈15ms  [非 ECS 上游] 到达且有效 → 放入暂存区
+     ...
+t=20ms  保护窗结束
+        暂存区有结果 → 释放最快那条
+        暂存区空 → 进入自由竞速
+     ...
+t=20-800ms  自由竞速
+        任意有效响应立即返回
+     ...
+t=800ms  硬超时
+        暂存区有结果 → 释放最快那条
+        全部失败 → SERVFAIL（EDE code=22, "No reachable upstream"）
 ```
 
-- **ECS_PROTECT_MS** (default 20ms): During this window, only upstreams that support ECS are accepted. Non-ECS responses go to staging. After the window, the fastest staged response is released, and all upstreams race equally.
-- **HARD_TIMEOUT_MS** (default 800ms): Total timeout. No further waiting after this.
+**赛后处理**：取得最快响应后，`postProcessBody()` 执行 ECH 注入（HTTPS 类型 + 区域启用）和 CF IP 替换（检测到 Cloudflare edge IP 则替换为区域优选域名解析结果）。
 
-**Post-processing**: After the fastest valid response is selected, `postProcessBody()` applies ECH injection (for HTTPS RRs on region-activated queries) and preferred IP remap (replaces Cloudflare CDN IPs with a region-optimized domain's resolved addresses).
+### EDNS / ECS 注入（edns.js）
 
-### EDNS / ECS Injection (edns.js)
+所有查询经过 `prepareQuery()`：
 
-All queries pass through `prepareQuery()` which:
+1. **ECS 注入**：从 `CF-Connecting-IP` 提取客户端 IP，注入 `/24`（IPv4）或 `/56`（IPv6）子网
+2. **UDP 4096**：强制 OPT 记录的 UDP 载荷大小为 4096
+3. **DO 位**：设置 DNSSEC OK 位
+4. **IP 过滤**：`filterAnswers()` 检查响应中所有 A/AAAA 记录是否命中 `BLOCKED_RANGES`，命中则整包丢弃
 
-1. **ECS injection**: If the request has no EDNS Client-Subnet option, extracts the client IP from `CF-Connecting-IP` and injects a `/24` (IPv4) or `/56` (IPv6) subnet.
-2. **UDP 4096**: Forces the OPT record's UDP payload size to 4096.
-3. **DO bit**: Sets the DNSSEC OK bit to request DNSSEC records.
-4. **IP filtering**: `filterAnswers()` checks all A/AAAA records in the response against `BLOCKED_RANGES`. Records matching any blocked CIDR cause the entire response to be discarded.
+### ECH 注入（ech.js）
 
-ECS depends on the `CF-Connecting-IP` header, which is only available when the Worker runs behind Cloudflare's proxy.
+区域启用 ECH（`.env` 中 `REGION_XX_ECH=true`）时生效：
 
-### ECH Injection (ech.js)
+1. **Cloudflare 域名**：通过内部 DNS 解析 `cloudflare-ech.com` 获取 HTTPS RR，提取 `ech=` 和 `alpn=` SvcParam，缓存 10 分钟
+2. **Meta CDN 域名**：使用硬编码的 `META_ECH_B64`（来自 TLS retry-config，详见 `META_ECH_HANDOFF.md`）
+3. **注入逻辑**：解析上游 DNS 响应，找到 HTTPS/SVCB 应答记录，替换其中 `ech=`/`alpn=` 参数，按 SvcParam key 排序后返回
 
-For region-activated queries where ECH is enabled (via `REGION_XX_ECH=true` in `.env`):
+### CDN 归属检测（special-domain.js）
 
-1. **Cloudflare domains**: `fetchCFEch()` resolves `cloudflare-ech.com` via the internal resolver, parses the HTTPS/SVCB RR from the response, extracts `ech=` and `alpn=` SvcParams, and caches the result for 10 minutes.
-2. **Meta CDN domains**: Uses a hardcoded base64-encoded ECH config (`META_ECH_B64`) obtained via TLS retry-config (see `META_ECH_HANDOFF.md`).
-3. **Injection**: `injectECH()` parses the upstream's DNS response, finds all HTTPS/SVCB answer records, replaces their `ech=` and `alpn=` parameters with the fetched/hardcoded values, sorts parameters by SvcParam key, and returns a modified DNS response.
+模块加载时编译两组 CIDR 列表：
+- **Cloudflare**：22 个 IPv4 范围 + 7 个 IPv6 范围
+- **Meta**：57 个 IPv4 范围 + 20 个 IPv6 范围
 
-If the upstream returned no answers for an HTTPS query, `injectECH()` synthesizes a fresh response with a single HTTPS record containing the ECH config.
+`detectOwner(ip)` 同步检测 IP 归属，`probeOwner(domain)` 异步解析域名的 A 记录后逐 IP 检测，缓存 1 小时。
 
-### CDN Owner Detection (special-domain.js)
+### 域名重映射（special-domain.js）
 
-The module compiles two CIDR lists at load time:
+区域激活时，拦截配置的 remap 域名（如 `twimg.com`、`twitter.com`、`x.com`、`t.co`）：
+- **AAAA**：返回空（禁用 IPv6）
+- **HTTPS**：注入 CF ECH
+- **A**：解析区域优选域名（如 `cf.090227.xyz`）获取 IP，以原域名返回
 
-- **Cloudflare** (22 IPv4 ranges, 7 IPv6 ranges)
-- **Meta** (57 IPv4 ranges, 20 IPv6 ranges)
+### Meta 域名 Google 兜底（_worker.js + dns-lib.js）
 
-`detectOwner(ip)` synchronously checks an IP against both compiled sets. `probeOwner(domain)` asynchronously resolves a domain's A records and checks each IP, caching results for 1 hour.
+Meta 域名（`facebook.com`、`instagram.com`、`fbcdn.net` 等）A/AAAA 查询先走 `resolveDNSWire` 竞速全上游。若失败（国内 DNS 对 Meta 域名返回空/污染），自动切换到 `resolveDNSWireGoogle()` 直连 `dns.google/dns-query`，确保国内也能解析。
 
-This is used by `postProcessBody()` in `mix.js` to determine whether to inject ECH configs into HTTPS RR responses (only injected for CF and Meta owned CDN domains).
+### IP 黑名单（edns.js + config.js）
 
-### Domain Remapping (special-domain.js)
+`BLOCKED_RANGES` 定义要过滤的 CIDR 范围。命中的 A/AAAA 记录导致整包丢弃。默认拦截：`127.0.0.0/8`、`0.0.0.0/32`、`::/128`、`::1/128`。
 
-When a region is active (e.g., `REGION=CN`), queries for configured remap domains (e.g., `twimg.com`, `twitter.com`, `x.com`, `t.co`) are intercepted:
+## 配置
 
-- **AAAA queries**: Returns an empty answer (disables IPv6).
-- **HTTPS queries**: Returns ECH config if available, otherwise an empty answer.
-- **A queries**: Resolves the region's preferred domain (e.g., `cf.090227.xyz`) via the internal resolver and returns those IPs with the original query name.
-
-### IP Blocklist (edns.js + config.js)
-
-`BLOCKED_RANGES` defines IPv4/IPv6 CIDR ranges to filter from upstream responses. Any A/AAAA record matching a blocked range causes the entire response to be discarded and replaced with SERVFAIL (with EDE code 17 "Filtered").
-
-Default blocklist: `127.0.0.0/8`, `0.0.0.0/32`, `::/128`, `::1/128`.
-
-## Configuration
-
-Edit `.env` then run `npm run build` to regenerate `config.js`.
+编辑 `.env`，执行 `npm run build` 生成 `config.js`。
 
 ```env
-# Upstream toggles (true = enabled, false = disabled)
+# 上游开关（true = 启用 / false = 禁用）
 GOOGLE=true
 CLOUDFLARE_PUBLIC=true
 QUAD9=true
@@ -196,112 +180,81 @@ ALIDNS=true
 360=false
 NEXTDNS=true
 
-# Custom upstream (format: CUSTOM_<name>=<DoH URL>)
+# 自定义上游（格式：CUSTOM_<名称>=<DoH URL>）
 # CUSTOM_MY=https://my-doh.example.com/dns-query
 
-# Racing parameters (milliseconds)
+# 竞速参数（毫秒）
 HARD_TIMEOUT_MS=800
 ECS_PROTECT_MS=20
 
-# ECS subnet prefix length
+# ECS 子网前缀
 ECS_PREFIX4=24
 ECS_PREFIX6=56
 
-# Response IP blocklist (space-separated CIDRs)
+# IP 黑名单（空格分隔 CIDR）
 BLOCKED_CIDRS=127.0.0.0/8 0.0.0.0/32 ::/128 ::1/128
 
-# Region optimization
+# 区域优化
 REGION=CN
 REGION_CN_PREFERRED=cf.090227.xyz
 REGION_CN_REMAP=twimg.com twitter.com x.com t.co
 REGION_CN_ECH=true
 ```
 
-The build script in `scripts/build-config.cjs` parses `.env` and generates `config.js` with:
+`REGION_XX_*` 按国家代码自动发现，每个区域支持三个参数：
+- `REGION_XX_PREFERRED` — 优选域名（CF edge IP 替换目标）
+- `REGION_XX_REMAP` — 要拦截的域名（空格分隔）
+- `REGION_XX_ECH` — 是否启用 ECH 注入（`true`/`false`）
 
-- **UPSTREAMS**: One entry per enabled preset, plus any `CUSTOM_*` entries (default `ecs: true` for custom).
-- **BLOCKED_RANGES**: Compiled from `BLOCKED_CIDRS` into `{family, addr, mask}` objects.
-- **REGION_CONFIG**: Auto-discovered from `REGION_XX_*` env vars. Each region supports `preferred` (domain for IP remap), `remap` (domains to intercept), and `ech` (boolean to enable ECH injection).
+## 响应头
 
-### Preset Upstreams
+| 头 | 说明 |
+|----|------|
+| `Content-Type` | `application/dns-message`（DNS 响应）或 `application/json`（错误/健康） |
+| `X-Upstream-Time` | 上游处理耗时（毫秒），仅 DNS 响应附带 |
 
-| Upstream | ECS | URL |
-|----------|-----|-----|
-| google | yes | dns.google/dns-query |
-| cloudflare_Public | no | cloudflare-dns.com/dns-query |
-| quad9 | yes | dns11.quad9.net/dns-query |
-| adguard | yes | dns.adguard-dns.com/dns-query |
-| opendns | yes | dns.opendns.com/dns-query |
-| yandex | no | common.dot.dns.yandex.net/dns-query |
-| dnspod | yes | sm2.doh.pub |
-| alidns | yes | dns.alidns.com |
-| 360 | yes | doh.360.cn/dns-query |
-| nextdns | yes | dns.nextdns.io |
-
-## Response Headers
-
-| Header | Description |
-|--------|-------------|
-| `X-Upstream-Time` | Upstream processing time in milliseconds (DNS responses only) |
-| `Content-Type` | `application/dns-message` for DNS responses, `application/json` for errors/health |
-
-## Deployment
+## 部署
 
 ```bash
 cd cloudflare-doh-v2
 
-# 1. Edit .env with your configuration
-# 2. Generate config.js from .env
+# 1. 编辑 .env
+# 2. 生成 config.js
 npm run build
 
-# 3. Deploy to Cloudflare Workers
+# 3. 部署到 Cloudflare Workers
 npm run deploy
 
-# Or run locally for development
+# 或本地开发
 npm run dev
 ```
 
-The `predeploy` hook in `package.json` automatically runs `npm run build` before `wrangler deploy`. The `wrangler.jsonc` also configures a build command so CI/CD deploys pick up the same step.
-
-## Testing
-
-```bash
-# Unit tests (Vitest configured, currently no test files)
-npm test
-
-# Manual endpoint testing
-curl "https://your-worker.dev/health"
-curl "https://your-worker.dev/dns-query?name=example.com&type=A"
-curl "https://your-worker.dev/google/dns-query?name=example.com&type=HTTPS"
-```
-
-## Project Structure
+## 项目结构
 
 ```
 cloudflare-doh-v2/
-├── .env                      # User configuration (edit this)
+├── .env                      # 用户配置（编辑此文件）
 ├── scripts/
-│   └── build-config.cjs      # Build script: parses .env, generates config.js
-├── config.js                 # Run-time configuration (auto-generated, do not edit)
-├── _worker.js                # Worker entry: routing, orchestration, DNS wire construction
-├── mix.js                    # Multi-upstream racing with ECS protect window
-├── edns.js                   # DNS packet parsing, EDNS injection, IP filtering
-├── ech.js                    # ECH config fetch and HTTPS/SVCB RR injection
-├── special-domain.js         # CDN owner detection, domain remapping, CIDR matching
-├── resolver.js               # Internal DNS resolver (wire queries, multi-upstream race)
-├── homepage.js               # Chinese/English management homepage with latency tester
-├── META_ECH_HANDOFF.md       # Meta CDN ECH retry-config documentation
-├── wrangler.jsonc            # Cloudflare Workers deployment config
-├── package.json              # npm scripts and dependencies
-└── README.md                 # This file
+│   └── build-config.cjs      # 构建脚本：解析 .env → 生成 config.js
+├── config.js                 # 运行时配置（自动生成，勿手动编辑）
+├── _worker.js                # 入口：路由、调度、特殊域名预处理
+├── mix.js                    # 多上游竞速引擎 + 赛后处理
+├── edns.js                   # DNS 包解析、ECS 注入、IP 过滤
+├── ech.js                    # ECH 配置获取 + HTTPS/SVCB RR 注入
+├── special-domain.js         # 域名重映射、CDN 归属检测、CIDR 匹配
+├── dns-lib.js                # DNS 线格式 / 响应构建 / 内部解析 统一库
+├── homepage.js               # 中英文管理首页 + 延迟检测工具
+├── META_ECH_HANDOFF.md       # Meta CDN ECH retry-config 获取文档
+├── wrangler.jsonc            # Cloudflare Workers 部署配置
+├── package.json
+└── README.md
 ```
 
-## Notes
+## 注意事项
 
-- **mix endpoint recommended for production**: Single upstreams may fail due to network instability or policy restrictions. The concurrent racing in `/dns-query` (mix) covers these gaps.
-- **CF subrequest limits**: Workers free plan supports ~6 concurrent subrequests, paid plan ~8-10. Enable no more than 8 upstreams to avoid internal queuing.
-- **CF-Connecting-IP**: ECS injection depends on this header. Only available behind Cloudflare proxy. For non-CF environments, pass the client IP manually.
-- **cloudflare_Public has no ECS**: This upstream does not support EDNS Client-Subnet. Useful for testing the protect window staging mechanism.
-- **Custom upstream defaults**: `CUSTOM_*` entries default to `ecs: true`. Adjust in `build-config.cjs` presets if the upstream does not support ECS.
-- **Yandex / 360**: Disabled by default. Higher latency or compatibility issues; enable on demand.
-- **ECH is region-gated**: ECH injection only activates when `REGION_XX_ECH=true` is set for the requesting client's country. See `META_ECH_HANDOFF.md` for Meta ECH details.
+- **推荐使用 mix 端点**：单上游可能因网络不稳定或策略限制失败，`/dns-query`（mix）并发竞速能兜底
+- **CF 子请求限制**：免费计划约 6 并发，付费约 8-10。建议启用不超过 8 个上游
+- **CF-Connecting-IP**：ECS 注入依赖此头，仅 Cloudflare 代理下可用
+- **ECSI 保护窗**：`cloudflare_Public` 不支持 ECS，在保护窗内会被暂存而非立即返回——这是设计行为，用于测试保护窗机制
+- **ECH 区域控制**：ECH 注入仅当 `REGION_XX_ECH=true` 时对对应国家/地区的请求生效
+- **Meta 域名 Google 兜底**：Meta 域名 A/AAAA 解析优先走竞速池，失败时自动切换 Google DoH 直连，保证国内可用
