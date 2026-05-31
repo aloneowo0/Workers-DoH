@@ -48,7 +48,7 @@ export default {
       _activePref = activePref;
 
       const remapDomains = regionCfg ? regionCfg.remap.map(d => d.toLowerCase()) : [];
-      if (queryMeta && regionActive && remapDomains.some(d => queryMeta.name === d || queryMeta.name.endsWith('.' + d))) {
+      if (queryMeta && regionActive && remapDomains.some(d => queryMeta.name === d)) {
         let echRdata = null;
         if (queryMeta.type === 65) {
           const cfEch = await fetchCFEch(null, null);
