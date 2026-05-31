@@ -95,7 +95,7 @@ export default {
           if (remapped !== null) return dnsResponse(remapped);
           return dnsResponse(buildDNS(qMeta.id, qMeta.name, qMeta.type, [], 60));
         }
-        if (regionActive && qMeta.type === 65 && isMeta) {
+        if (qMeta.type === 65 && isMeta) {
           const injected = await injectECH(body, qMeta.name, 'META', null);
           if (injected) {
             const bytes = injected instanceof Response ? await injected.arrayBuffer() : injected;
