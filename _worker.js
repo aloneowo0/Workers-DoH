@@ -62,8 +62,15 @@ export default {
       if (route.health) return healthResponse(upstreamNames);
       if (route.error) return jsonError(route.error);
 
+      // Parse query metadata from URL (GET) or body (POST)
       const url = new URL(request.url);
-      const qMeta = parseQueryMetaFromURL(url);
+      let qMeta = parseQueryMetaFromURL(url);
+      if (request.method === 'POST') {
+        const rawBody = await request.clone().arrayBuffer();
+        qMeta = parseQueryMeta(rawBody);
+        body = rawBody;
+      }
+
       const clientCountry = request.cf && request.cf.country || '';
       const regionCfg = REGION_CONFIG && REGION_CONFIG[clientCountry];
       const regionActive = !!(regionCfg && regionCfg.preferred);
@@ -76,7 +83,7 @@ export default {
         const isMeta = isMetaDomain(qMeta.name);
 
         if (isRemap || isMeta) {
-          body = buildQueryWire(qMeta.name, qMeta.type, qMeta.id);
+          body = body || buildQueryWire(qMeta.name, qMeta.type, qMeta.id);
         }
         if (isRemap) {
           let echRdata = null;
@@ -107,14 +114,16 @@ export default {
         return await rfc8484Passthrough(route, request);
       }
 
-      if (request.method === 'GET') {
-        body = body || buildQueryFromURL(url);
-        if (!body) return jsonError('missing_name_or_type');
-      } else {
-        body = body || await request.clone().arrayBuffer();
+      if (!body) {
+        if (request.method === 'GET') {
+          body = buildQueryFromURL(url);
+          if (!body) return jsonError('missing_name_or_type');
+        } else {
+          body = await request.clone().arrayBuffer();
+        }
       }
       const clientIP = request.headers.get('CF-Connecting-IP');
-      const queryMeta = parseQueryMeta(body);
+      const queryMeta = qMeta || parseQueryMeta(body);
 
       if (route.provider === MIX_PROVIDER) {
         return await concurrentAll(body, clientIP, queryMeta, echActive, activePref);
