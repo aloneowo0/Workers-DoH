@@ -15,7 +15,8 @@ const TYPE_AAAA = 28;
 const TYPE_HTTPS = 65;
 const CACHE_TTL = 300_000;
 
-const GOOGLE_DOH_JSON = 'https://dns.google/resolve';
+import { resolveDNSWire, extractIPBytes } from './resolver.js';
+
 const ipCache = new Map();
 
 export async function remapResponse(originalBody, queryName, queryType, preferredDomain, echRdata) {
@@ -59,24 +60,10 @@ export async function resolvePreferredIPs(domain, type) {
             return cached.ips;
         }
 
-        const url = `${GOOGLE_DOH_JSON}?name=${encodeURIComponent(domain)}&type=${type}`;
-        const res = await fetch(url, { headers: { 'Accept': 'application/dns-json' } });
-        if (!res.ok) return null;
+        const buf = await resolveDNSWire(domain, type);
+        if (!buf) return null;
 
-        const data = await res.json();
-        if (!data.Answer) return null;
-
-        const ips = [];
-        for (const a of data.Answer) {
-            if (a.type === type) {
-                if (type === TYPE_A) {
-                    ips.push(ipToBytes(a.data));
-                } else if (type === TYPE_AAAA) {
-                    ips.push(ipv6ToBytes(a.data));
-                }
-            }
-        }
-
+        const ips = extractIPBytes(buf, type);
         if (ips.length > 0) {
             ipCache.set(cacheKey, { ips, expires: Date.now() + CACHE_TTL });
             return ips;
@@ -156,27 +143,6 @@ function parseQueryId(body) {
     } catch (_) {
         return 0;
     }
-}
-
-function ipToBytes(ip) {
-    return new Uint8Array(ip.split('.').map(Number));
-}
-
-function ipv6ToBytes(ip) {
-    let parts = ip.split(':');
-    if (ip.includes('::')) {
-        const [left, right] = ip.split('::');
-        const leftParts = left ? left.split(':') : [];
-        const rightParts = right ? right.split(':') : [];
-        parts = [...leftParts, ...Array(8 - leftParts.length - rightParts.length).fill('0'), ...rightParts];
-    }
-    const buf = new Uint8Array(16);
-    for (let i = 0; i < parts.length; i++) {
-        const val = parseInt(parts[i], 16) || 0;
-        buf[i * 2] = val >> 8;
-        buf[i * 2 + 1] = val & 0xFF;
-    }
-    return buf;
 }
 
 function toBytes(body) {

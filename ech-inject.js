@@ -1,3 +1,5 @@
+import { resolveDNSWire } from './resolver.js';
+
 const DNS_HEADER_LEN = 12;
 const TYPE_HTTPS = 65;
 const MAX_NAME_JUMPS = 128;
@@ -5,49 +7,46 @@ const SVC_KEY_ALPN = 1;
 const SVC_KEY_ECH = 5;
 const CACHE_TTL_MS = 600000;
 const CF_ECH_DOMAIN = 'cloudflare-ech.com';
-const GOOGLE_DOH = 'https://dns.google/resolve';
 
 const META_ECH_B64 = 'AEj+DQBEAQAgACAdd+scUi0IYFsXnUIU7ko2Nd9+F8M26pAGZVpz/KrWPgAEAAEAAWQVZWNoLXB1YmxpYy5hdG1ldGEuY29tAAA=';
 
 const echCache = new Map();
 
-export async function fetchCFEch(env, ctx) {
+export async function fetchCFEch(_env, _ctx) {
     try {
         const cached = echCache.get(CF_ECH_DOMAIN);
         if (cached && (Date.now() - cached.ts) < CACHE_TTL_MS) {
             return cached.data;
         }
 
-        const url = GOOGLE_DOH + '?name=' + encodeURIComponent(CF_ECH_DOMAIN) + '&type=' + TYPE_HTTPS;
-        const res = await fetch(url, {
-            headers: { 'Accept': 'application/dns-json' }
-        });
+        const buf = await resolveDNSWire(CF_ECH_DOMAIN, TYPE_HTTPS);
+        if (!buf) return null;
 
-        if (!res.ok) return null;
+        const packet = parseDns(buf);
+        if (!packet || packet.header.ancount === 0) return null;
 
-        const data = await res.json();
-        if (data.Status !== 0 || !data.Answer) return null;
+        const ans = findHttpsAnswer(packet);
+        if (!ans) return null;
 
-        const ans = data.Answer.find(function (a) { return a.type === TYPE_HTTPS; });
-        if (!ans || ans.data.startsWith('\\#')) return null;
-
-        const parts = ans.data.split(/\s+/);
-        if (parts.length < 3) return null;
+        const httpsRdata = parseHttpsRdata(packet.view, ans.rdataOffset, ans.rdlength);
+        if (!httpsRdata) return null;
 
         const params = [];
-        for (let i = 2; i < parts.length; i++) {
-            const eq = parts[i].indexOf('=');
-            if (eq === -1) continue;
-            const k = parts[i].slice(0, eq);
-            const v = parts[i].slice(eq + 1);
-            if (k === 'alpn' || k === 'ech') {
-                params.push({ key: k, val: v });
-            }
+        for (let i = 0; i < httpsRdata.paramBytes.length; i++) {
+            const pb = httpsRdata.paramBytes[i];
+            if (pb.length < 4) continue;
+            const keyId = new DataView(pb.buffer, pb.byteOffset, 2).getUint16(0);
+            const valLen = new DataView(pb.buffer, pb.byteOffset, 2).getUint16(2);
+            if (keyId !== SVC_KEY_ALPN && keyId !== SVC_KEY_ECH) continue;
+            const valBytes = pb.subarray(4, 4 + valLen);
+            const key = keyId === SVC_KEY_ALPN ? 'alpn' : 'ech';
+            const val = key === 'alpn' ? decodeAlpn(valBytes) : encodeBase64Url(valBytes);
+            params.push({ key: key, val: val });
         }
 
-        const priority = parseInt(parts[0], 10) || 0;
-        const target = parts[1];
-        const rdata = packHttpsParams(priority, target, params);
+        if (params.length === 0) return null;
+
+        const rdata = packHttpsParams(httpsRdata.priority, httpsRdata.target, params);
 
         const result = { rdata: rdata, params: params };
         echCache.set(CF_ECH_DOMAIN, { ts: Date.now(), data: result });
@@ -55,6 +54,32 @@ export async function fetchCFEch(env, ctx) {
     } catch (_) {
         return null;
     }
+}
+
+function findHttpsAnswer(packet) {
+    for (let i = 0; i < packet.answers.length; i++) {
+        if (packet.answers[i].type === TYPE_HTTPS) return packet.answers[i];
+    }
+    return null;
+}
+
+function decodeAlpn(bytes) {
+    const ids = [];
+    let o = 0;
+    while (o < bytes.length) {
+        const len = bytes[o]; o++;
+        let s = '';
+        for (let j = 0; j < len; j++) s += String.fromCharCode(bytes[o + j]);
+        ids.push(s);
+        o += len;
+    }
+    return ids.join(',');
+}
+
+function encodeBase64Url(bytes) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 export async function injectECH(originalResponse, queryName, ownerType, echConfig) {

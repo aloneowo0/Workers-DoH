@@ -151,16 +151,12 @@ function parseQueryMeta(body) {
 
 async function rfc8484Passthrough(route, request) {
   let target = route.provider === MIX_PROVIDER
-    ? (UPSTREAMS['google'] || Object.values(UPSTREAMS)[0])
+    ? Object.values(UPSTREAMS)[0]
     : UPSTREAMS[route.provider];
   if (!target) return jsonError('unknown_provider');
 
-  const jsonUrl = target.url.includes('dns.google/dns-query')
-    ? 'https://dns.google/resolve'
-    : target.url;
-
   const query = route.queryString;
-  const upstreamReq = new Request(jsonUrl + query, {
+  const upstreamReq = new Request(target.url + query, {
     method: request.method,
     headers: {
       'Accept': 'application/dns-json',

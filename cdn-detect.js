@@ -4,6 +4,8 @@
  * using compiled CIDR range matching.
  */
 
+import { resolveDNSWire, extractIPStrings } from './resolver.js';
+
 const RAW_META_CIDRS = [
     '31.13.24.0/21', '31.13.64.0/18', '45.64.40.0/22',
     '57.141.0.0/24', '57.141.2.0/23', '57.141.4.0/22',
@@ -63,7 +65,6 @@ const RAW_CF_CIDRS = [
 ];
 
 const CACHE_TTL = 3600 * 1000;
-const GOOGLE_DOH_JSON = 'https://dns.google/resolve';
 
 const probeCache = new Map();
 
@@ -125,16 +126,9 @@ export async function probeOwner(domain) {
 
 async function resolveA(domain) {
     try {
-        const url = `${GOOGLE_DOH_JSON}?name=${encodeURIComponent(domain)}&type=1`;
-        const res = await fetch(url, { headers: { 'Accept': 'application/dns-json' } });
-        if (!res.ok) return [];
-        const data = await res.json();
-        if (data.Answer) {
-            return data.Answer
-                .filter(function (a) { return a.type === 1 && a.data; })
-                .map(function (a) { return a.data; });
-        }
-        return [];
+        const buf = await resolveDNSWire(domain, 1);
+        if (!buf) return [];
+        return extractIPStrings(buf, 1);
     } catch (_) {
         return [];
     }
