@@ -92,7 +92,7 @@ function buildQueryFromURL(url) {
   if (!name) return null;
   const typeStr = (url.searchParams.get('type') || 'A').toUpperCase();
   const typeMap = { A: 1, AAAA: 28, TXT: 16, MX: 15, CNAME: 5, NS: 2, SOA: 6, PTR: 12, HTTPS: 65, SVCB: 64 };
-  const qtype = typeMap[typeStr] || 1;
+  const qtype = typeMap[typeStr] || parseInt(typeStr, 10) || 1;
 
   const buf = new ArrayBuffer(12);
   const view = new DataView(buf);
