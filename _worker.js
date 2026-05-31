@@ -185,14 +185,40 @@ function buildQueryFromURL(url) {
 }
 
 function parseQueryMetaFromURL(url) {
-  const dnsParam = url.searchParams.get('dns');
-  const name = url.searchParams.get('name');
-  if (!dnsParam && !name) return null;
   const typeStr = (url.searchParams.get('type') || 'A').toUpperCase();
   const typeMap = { A: 1, AAAA: 28, TXT: 16, MX: 15, CNAME: 5, NS: 2, SOA: 6, PTR: 12, HTTPS: 65, SVCB: 64 };
   const qtype = typeMap[typeStr] || parseInt(typeStr, 10) || 1;
-  const qname = name || 'unknown.';
-  return { id: Math.floor(Math.random() * 65536), name: qname.toLowerCase().replace(/\.+$/, ''), type: qtype };
+
+  const name = url.searchParams.get('name');
+  if (name) {
+    return { id: Math.floor(Math.random() * 65536), name: name.toLowerCase().replace(/\.+$/, ''), type: qtype };
+  }
+
+  const dnsParam = url.searchParams.get('dns');
+  if (dnsParam) {
+    try {
+      const b64 = dnsParam.replace(/-/g, '+').replace(/_/g, '/');
+      const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+      if (bin.length < 12) return null;
+      const view = new DataView(bin.buffer);
+      const id = view.getUint16(0);
+      let off = 12;
+      const labels = [];
+      for (let jumps = 0; jumps < 128; jumps++) {
+        if (off >= bin.length) return null;
+        const len = bin[off];
+        if ((len & 0xC0) === 0xC0) { off += 2; break; }
+        if (len === 0) { off++; break; }
+        off++;
+        labels.push(new TextDecoder().decode(bin.subarray(off, off + len)));
+        off += len;
+      }
+      const qType = view.getUint16(off);
+      return { id, name: labels.join('.').toLowerCase(), type: qType };
+    } catch (_) {}
+  }
+
+  return null;
 }
 
 function buildQueryWire(qname, qtype, id) {
